@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"mash/internal/event"
@@ -64,6 +65,16 @@ func (b *Boatman) HandleTransferPlan(e event.Event) {
 
 	// Use objID (which is the relative path from the provider) to build the correct destination filepath structure.
 	targetFilePath := filepath.Join(tgtProvider.Path, objID)
+
+	// Prevent path traversal by ensuring targetFilePath is strictly inside tgtProvider.Path
+	cleanTgtPath := filepath.Clean(tgtProvider.Path)
+	cleanTargetFilePath := filepath.Clean(targetFilePath)
+	rel, err := filepath.Rel(cleanTgtPath, cleanTargetFilePath)
+	if err != nil || strings.HasPrefix(rel, "..") || strings.HasPrefix(rel, "/") {
+		b.failJob(objID, tgtProvID, fmt.Errorf("path traversal attempt detected for object ID: %s", objID))
+		return
+	}
+
 	targetDir := filepath.Dir(targetFilePath)
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
 		b.failJob(objID, tgtProvID, fmt.Errorf("failed to create directory tree %s: %v", targetDir, err))
