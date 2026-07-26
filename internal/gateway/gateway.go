@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path"
+	"strings"
 
 	"mash/internal/librarian"
 )
@@ -44,7 +46,11 @@ func (g *Gateway) HandleObjects(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		var obj librarian.Object
 		if err := json.NewDecoder(r.Body).Decode(&obj); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
+			return
+		}
+		if !isValidObjectID(obj.ID) {
+			http.Error(w, "Invalid or unsafe object ID", http.StatusBadRequest)
 			return
 		}
 		g.catalog.PutObject(&obj)
@@ -54,6 +60,30 @@ func (g *Gateway) HandleObjects(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+// isValidObjectID returns true if the object ID is safe and valid (not empty, no path traversal).
+func isValidObjectID(id string) bool {
+	if id == "" {
+		return false
+	}
+	// Normalize backslashes to slashes to handle Windows/Unix styles
+	normalized := strings.ReplaceAll(id, "\\", "/")
+
+	// Clean the path using path.Clean (works with forward slashes)
+	cleaned := path.Clean(normalized)
+
+	// If it's empty, "." or contains drive indicators (e.g., ":"), it's invalid
+	if cleaned == "" || cleaned == "." || strings.Contains(cleaned, ":") {
+		return false
+	}
+
+	// Must not escape directory (not start with "../", "/" or look like an absolute/relative escape)
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") || strings.HasPrefix(cleaned, "/") {
+		return false
+	}
+
+	return true
 }
 
 // HandleProviders lists storage provider status.

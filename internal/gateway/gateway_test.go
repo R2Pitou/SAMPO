@@ -108,6 +108,58 @@ func TestHandleObjects(t *testing.T) {
 		}
 	})
 
+	t.Run("POST - Unsafe/Invalid Object IDs", func(t *testing.T) {
+		unsafeIDs := []string{
+			"../../etc/passwd",
+			"/etc/passwd",
+			"..",
+			"C:\\windows\\win.ini",
+			"foo/../../bar",
+			"\\absolute\\path",
+			"",
+		}
+
+		for _, id := range unsafeIDs {
+			t.Run("ID: "+id, func(t *testing.T) {
+				badObj := librarian.Object{
+					ID:   id,
+					Hash: "hash-bad",
+				}
+				bodyBytes, _ := json.Marshal(badObj)
+				req, err := http.NewRequest(http.MethodPost, "/objects", bytes.NewBuffer(bodyBytes))
+				if err != nil {
+					t.Fatalf("failed to create request: %v", err)
+				}
+
+				rr := httptest.NewRecorder()
+				gw.HandleObjects(rr, req)
+
+				if rr.Code != http.StatusBadRequest {
+					t.Errorf("expected status BadRequest for ID '%s', got %v", id, rr.Code)
+				}
+			})
+		}
+	})
+
+	t.Run("POST - Safe Subdirectory Object ID", func(t *testing.T) {
+		safeObj := librarian.Object{
+			ID:   "docs/sub/my-doc.txt",
+			Hash: "hash-safe",
+		}
+		bodyBytes, _ := json.Marshal(safeObj)
+		req, err := http.NewRequest(http.MethodPost, "/objects", bytes.NewBuffer(bodyBytes))
+		if err != nil {
+			t.Fatalf("failed to create request: %v", err)
+		}
+
+		rr := httptest.NewRecorder()
+		gw.HandleObjects(rr, req)
+
+		if rr.Code != http.StatusCreated {
+			t.Errorf("expected status Created for safe ID, got %v", rr.Code)
+		}
+	})
+
 	t.Run("PUT - Method Not Allowed", func(t *testing.T) {
 		req, err := http.NewRequest(http.MethodPut, "/objects", nil)
 		if err != nil {
