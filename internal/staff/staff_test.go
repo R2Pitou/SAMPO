@@ -215,3 +215,187 @@ func TestMASHStaffIntegration(t *testing.T) {
 		t.Errorf("expected EventProviderOffline to have been published")
 	}
 }
+
+func TestMASHStaffControlAndTiering(t *testing.T) {
+	tmpDir := t.TempDir()
+	ssdReadOnlyPath := filepath.Join(tmpDir, "ssd-readonly")
+	ssdFullPath := filepath.Join(tmpDir, "ssd-full")
+	hddFullPath := filepath.Join(tmpDir, "hdd-full")
+
+	_ = os.MkdirAll(ssdReadOnlyPath, 0755)
+	_ = os.MkdirAll(ssdFullPath, 0755)
+	_ = os.MkdirAll(hddFullPath, 0755)
+
+	bus := event.NewBus()
+	catalog := librarian.NewSeshat(bus, nil)
+
+	// Register the 3 providers
+	provSSDReadOnly := &config.StorageProvider{
+		ID:   "prov-ssd-readonly",
+		Type: "local",
+		Path: ssdReadOnlyPath,
+		Capabilities: map[string]string{
+			"latency":    "low",
+			"drive_type": "ssd",
+			"control":    "index_observe",
+			"read_only":  "true",
+		},
+	}
+	provSSDFull := &config.StorageProvider{
+		ID:   "prov-ssd-full",
+		Type: "local",
+		Path: ssdFullPath,
+		Capabilities: map[string]string{
+			"latency":    "low",
+			"drive_type": "ssd",
+			"control":    "full",
+			"read_only":  "false",
+		},
+	}
+	provHDDFull := &config.StorageProvider{
+		ID:   "prov-hdd-full",
+		Type: "local",
+		Path: hddFullPath,
+		Capabilities: map[string]string{
+			"latency":    "high",
+			"drive_type": "hdd",
+			"control":    "full",
+			"read_only":  "false",
+		},
+	}
+
+	catalog.AddProvider(provSSDReadOnly)
+	catalog.AddProvider(provSSDFull)
+	catalog.AddProvider(provHDDFull)
+
+	// Define policies: replicate target = 2, and migrate
+	policies := []config.Policy{
+		{
+			ID:       "policy-replicate",
+			Type:     "replicate",
+			Target:   "object",
+			Value:    "2",
+			Priority: 1,
+		},
+		{
+			ID:       "tier-by-frequency",
+			Type:     "migrate",
+			Target:   "object",
+			Value:    "ssd-for-frequent-hdd-for-infrequent",
+			Priority: 10,
+		},
+	}
+
+	_ = staff.NewTuoni(catalog, bus, policies)
+	_ = staff.NewBoatman(catalog, bus)
+	observer := staff.NewObserver(catalog, bus)
+
+	// Test 1: "index_observe" read-only exclusion logic.
+	// We write a file to ssd-full. It should replicate to hdd-full, but NEVER to ssd-readonly.
+	testFile1 := "doc1.txt"
+	_ = os.WriteFile(filepath.Join(ssdFullPath, testFile1), []byte("content of doc1"), 0644)
+
+	observer.ScanProviders()
+
+	// Wait for replication to trigger and finish
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		obj, err := catalog.GetObject(testFile1)
+		if err == nil {
+			obj.RLock()
+			if len(obj.Versions) > 0 && len(obj.Versions[0].Copies) >= 2 {
+				obj.RUnlock()
+				break
+			}
+			obj.RUnlock()
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Verify that prov-ssd-readonly has NO copies of doc1.txt
+	obj1, err := catalog.GetObject(testFile1)
+	if err != nil {
+		t.Fatalf("doc1.txt not found in catalog: %v", err)
+	}
+	obj1.RLock()
+	for _, cp := range obj1.Versions[0].Copies {
+		if cp.ProviderID == "prov-ssd-readonly" {
+			t.Errorf("Error: read-only provider prov-ssd-readonly received replicated copy!")
+		}
+	}
+	obj1.RUnlock()
+
+	// Verify that it actually replicated to hdd-full
+	replicatedPath := filepath.Join(hddFullPath, testFile1)
+	if _, err := os.Stat(replicatedPath); os.IsNotExist(err) {
+		t.Errorf("Expected replication of doc1.txt to hdd-full")
+	}
+
+	// Test 2: Hot file tiering.
+	// Create an object that is hot (access_frequency: high) on hdd-full.
+	// Tuoni should migrate/replicate it to ssd-full.
+	testFileHot := "hotfile.txt"
+	hotPath := filepath.Join(hddFullPath, testFileHot)
+	_ = os.WriteFile(hotPath, []byte("hot bytes"), 0644)
+
+	// Discovered by observer (defaults to low access frequency, let's update catalog entry to high access frequency)
+	observer.ScanProviders()
+
+	// Wait for discovery
+	var hotObj *librarian.Object
+	for time.Now().Before(time.Now().Add(1 * time.Second)) {
+		hotObj, err = catalog.GetObject(testFileHot)
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if hotObj == nil {
+		t.Fatalf("Failed to discover hotfile.txt")
+	}
+
+	// Manually set access frequency to high
+	hotObj.Lock()
+	hotObj.Metadata["access_frequency"] = "high"
+	hotObj.Unlock()
+
+	// Re-evaluate policies
+	bus.Publish(event.Event{
+		ID:        "trigger-policy-eval",
+		Type:      event.EventPolicyChanged,
+		Timestamp: time.Now(),
+		Payload: map[string]interface{}{
+			"policies": policies,
+		},
+	})
+
+	// Wait up to 2 seconds for migration to SSD
+	deadline = time.Now().Add(2 * time.Second)
+	var foundSSD bool
+	for time.Now().Before(deadline) {
+		hotObj, _ = catalog.GetObject(testFileHot)
+		hotObj.RLock()
+		if len(hotObj.Versions) > 0 {
+			for _, cp := range hotObj.Versions[0].Copies {
+				if cp.ProviderID == "prov-ssd-full" && cp.State == "healthy" {
+					foundSSD = true
+					break
+				}
+			}
+		}
+		hotObj.RUnlock()
+		if foundSSD {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if !foundSSD {
+		t.Errorf("Expected hotfile.txt to be tiered/copied to prov-ssd-full")
+	}
+
+	// Check that the file actually exists on ssd-full
+	if _, err := os.Stat(filepath.Join(ssdFullPath, testFileHot)); os.IsNotExist(err) {
+		t.Errorf("Expected physical file hotfile.txt on ssd-full")
+	}
+}
