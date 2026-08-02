@@ -15,7 +15,12 @@ import (
 	"sampo/internal/domain"
 )
 
-const schemaVersion = 1
+const schemaVersion = 2
+
+var (
+	ErrProviderRootDuplicate = errors.New("provider root is already enrolled")
+	ErrProviderRootOverlap   = errors.New("provider root overlaps an enrolled provider")
+)
 
 type Store struct {
 	db *sql.DB
@@ -92,9 +97,14 @@ func (s *Store) migrate(ctx context.Context) error {
 		return fmt.Errorf("begin catalogue migration: %w", err)
 	}
 	defer tx.Rollback()
-	if version == 0 {
+	if version < 1 {
 		if _, err := tx.ExecContext(ctx, migrationV1); err != nil {
 			return fmt.Errorf("apply catalogue migration 1: %w", err)
+		}
+	}
+	if version < 2 {
+		if _, err := tx.ExecContext(ctx, migrationV2); err != nil {
+			return fmt.Errorf("apply catalogue migration 2: %w", err)
 		}
 	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version=%d", schemaVersion)); err != nil {
@@ -166,7 +176,28 @@ CREATE TABLE scan_issues (
 );
 `
 
-func (s *Store) AddFilesystemProvider(ctx context.Context, displayName, root string) (domain.Provider, error) {
+const migrationV2 = `
+ALTER TABLE providers ADD COLUMN submitted_locator TEXT NOT NULL DEFAULT '';
+ALTER TABLE providers ADD COLUMN operational_locator TEXT NOT NULL DEFAULT '';
+ALTER TABLE providers ADD COLUMN final_path_evidence TEXT NOT NULL DEFAULT '';
+ALTER TABLE providers ADD COLUMN physical_identity TEXT NOT NULL DEFAULT '';
+ALTER TABLE providers ADD COLUMN fallback_identity TEXT NOT NULL DEFAULT '';
+ALTER TABLE providers ADD COLUMN identity_confidence TEXT NOT NULL DEFAULT 'legacy-unverified';
+ALTER TABLE providers ADD COLUMN catalogue_only INTEGER NOT NULL DEFAULT 1 CHECK (catalogue_only IN (0, 1));
+UPDATE providers SET submitted_locator=root_locator, operational_locator=root_locator,
+    final_path_evidence=root_locator WHERE submitted_locator='';
+CREATE UNIQUE INDEX providers_physical_identity_idx
+    ON providers(physical_identity)
+    WHERE physical_identity != '' AND identity_confidence IN ('strong', 'fallback');
+CREATE UNIQUE INDEX providers_fallback_identity_idx
+    ON providers(fallback_identity)
+    WHERE fallback_identity != '' AND identity_confidence IN ('strong', 'fallback');
+`
+
+func (s *Store) AddFilesystemProvider(ctx context.Context, displayName string, root domain.ProviderRoot) (domain.Provider, error) {
+	if err := validateProviderRoot(root); err != nil {
+		return domain.Provider{}, err
+	}
 	id, err := domain.NewID()
 	if err != nil {
 		return domain.Provider{}, err
@@ -174,19 +205,76 @@ func (s *Store) AddFilesystemProvider(ctx context.Context, displayName, root str
 	now := time.Now().UTC()
 	provider := domain.Provider{
 		ID: id, Kind: domain.ProviderFilesystem, DisplayName: displayName,
-		RootLocator: root, CreatedAt: now, ScanStatus: "never-scanned",
+		RootLocator: root.SubmittedLocator, ProviderRoot: root,
+		CreatedAt: now, ScanStatus: "never-scanned",
 	}
-	_, err = s.db.ExecContext(ctx, `
-        INSERT INTO providers(id, kind, display_name, root_locator, created_at_ns, scan_status)
-        VALUES (?, ?, ?, ?, ?, ?)`,
-		provider.ID, provider.Kind, provider.DisplayName, provider.RootLocator, unixNano(now), provider.ScanStatus)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Provider{}, fmt.Errorf("begin provider enrollment: %w", err)
+	}
+	defer tx.Rollback()
+	if err := rejectRootConflict(ctx, tx, "", root); err != nil {
+		return domain.Provider{}, err
+	}
+	_, err = tx.ExecContext(ctx, `
+        INSERT INTO providers(id, kind, display_name, root_locator, submitted_locator,
+            operational_locator, final_path_evidence, physical_identity, fallback_identity,
+            identity_confidence, catalogue_only, created_at_ns, scan_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		provider.ID, provider.Kind, provider.DisplayName, provider.RootLocator,
+		root.SubmittedLocator, root.OperationalLocator, root.FinalPathEvidence,
+		root.PhysicalIdentity, root.FallbackIdentity, root.IdentityConfidence,
+		root.CatalogueOnly, unixNano(now), provider.ScanStatus)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return domain.Provider{}, fmt.Errorf("provider root is already enrolled")
+			return domain.Provider{}, ErrProviderRootDuplicate
 		}
 		return domain.Provider{}, fmt.Errorf("add filesystem provider: %w", err)
 	}
+	if err := tx.Commit(); err != nil {
+		return domain.Provider{}, fmt.Errorf("commit provider enrollment: %w", err)
+	}
 	return provider, nil
+}
+
+func (s *Store) EstablishProviderRoot(ctx context.Context, providerID string, root domain.ProviderRoot) error {
+	if err := validateProviderRoot(root); err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin provider identity establishment: %w", err)
+	}
+	defer tx.Rollback()
+	var confidence string
+	if err := tx.QueryRowContext(ctx, `SELECT identity_confidence FROM providers WHERE id=?`, providerID).Scan(&confidence); err != nil {
+		return err
+	}
+	if confidence != domain.RootIdentityLegacy {
+		return errors.New("provider root identity is already established")
+	}
+	if err := rejectRootConflict(ctx, tx, providerID, root); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE providers SET root_locator=?, submitted_locator=?,
+        operational_locator=?, final_path_evidence=?, physical_identity=?, fallback_identity=?,
+        identity_confidence=?, catalogue_only=? WHERE id=? AND identity_confidence=?`,
+		root.SubmittedLocator, root.SubmittedLocator, root.OperationalLocator,
+		root.FinalPathEvidence, root.PhysicalIdentity, root.FallbackIdentity,
+		root.IdentityConfidence, root.CatalogueOnly, providerID, domain.RootIdentityLegacy)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return ErrProviderRootDuplicate
+		}
+		return fmt.Errorf("establish provider root identity: %w", err)
+	}
+	if n, _ := result.RowsAffected(); n != 1 {
+		return errors.New("provider root identity changed concurrently")
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit provider identity establishment: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) Provider(ctx context.Context, id string) (domain.Provider, error) {
@@ -211,7 +299,9 @@ func (s *Store) Providers(ctx context.Context) ([]domain.Provider, error) {
 	return providers, rows.Err()
 }
 
-const providerSelect = `SELECT id, kind, display_name, root_locator, created_at_ns,
+const providerSelect = `SELECT id, kind, display_name, root_locator,
+    submitted_locator, operational_locator, final_path_evidence, physical_identity,
+    fallback_identity, identity_confidence, catalogue_only, created_at_ns,
     last_scan_started_ns, last_scan_ended_ns, scan_status, scan_error FROM providers`
 
 type rowScanner interface{ Scan(...any) error }
@@ -220,13 +310,17 @@ func scanProvider(row rowScanner) (domain.Provider, error) {
 	var p domain.Provider
 	var created int64
 	var started, ended sql.NullInt64
-	if err := row.Scan(&p.ID, &p.Kind, &p.DisplayName, &p.RootLocator, &created,
+	if err := row.Scan(&p.ID, &p.Kind, &p.DisplayName, &p.RootLocator,
+		&p.SubmittedLocator, &p.OperationalLocator, &p.FinalPathEvidence,
+		&p.PhysicalIdentity, &p.FallbackIdentity, &p.IdentityConfidence,
+		&p.CatalogueOnly, &created,
 		&started, &ended, &p.ScanStatus, &p.ScanError); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.Provider{}, err
 		}
 		return domain.Provider{}, fmt.Errorf("scan provider: %w", err)
 	}
+	p.RootLocator = p.SubmittedLocator
 	p.CreatedAt = fromUnixNano(created)
 	if started.Valid {
 		v := fromUnixNano(started.Int64)
@@ -237,6 +331,107 @@ func scanProvider(row rowScanner) (domain.Provider, error) {
 		p.LastScanEnded = &v
 	}
 	return p, nil
+}
+
+type providerRootRow struct {
+	ID string
+	domain.ProviderRoot
+}
+
+func validateProviderRoot(root domain.ProviderRoot) error {
+	if root.SubmittedLocator == "" || root.OperationalLocator == "" || root.FinalPathEvidence == "" {
+		return errors.New("provider root identity evidence is incomplete")
+	}
+	switch root.IdentityConfidence {
+	case domain.RootIdentityStrong, domain.RootIdentityFallback, domain.RootIdentityWeak:
+	default:
+		return fmt.Errorf("invalid provider root identity confidence %q", root.IdentityConfidence)
+	}
+	if root.IdentityConfidence != domain.RootIdentityWeak && root.PhysicalIdentity == "" && root.FallbackIdentity == "" {
+		return errors.New("provider root physical identity is required")
+	}
+	if root.IdentityConfidence == domain.RootIdentityWeak && !root.CatalogueOnly {
+		return errors.New("weak provider root identity must be catalogue-only")
+	}
+	return nil
+}
+
+func rejectRootConflict(ctx context.Context, tx *sql.Tx, excludedID string, candidate domain.ProviderRoot) error {
+	rows, err := tx.QueryContext(ctx, `SELECT id, submitted_locator, operational_locator,
+        final_path_evidence, physical_identity, fallback_identity, identity_confidence,
+        catalogue_only FROM providers WHERE id != ?`, excludedID)
+	if err != nil {
+		return fmt.Errorf("load enrolled provider roots: %w", err)
+	}
+	defer rows.Close()
+	var enrolled []providerRootRow
+	for rows.Next() {
+		var item providerRootRow
+		if err := rows.Scan(&item.ID, &item.SubmittedLocator, &item.OperationalLocator,
+			&item.FinalPathEvidence, &item.PhysicalIdentity, &item.FallbackIdentity,
+			&item.IdentityConfidence, &item.CatalogueOnly); err != nil {
+			return fmt.Errorf("scan enrolled provider root: %w", err)
+		}
+		enrolled = append(enrolled, item)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, existing := range enrolled {
+		if samePhysicalRoot(existing.ProviderRoot, candidate) {
+			return fmt.Errorf("%w: provider %s", ErrProviderRootDuplicate, existing.ID)
+		}
+		if rootPathsOverlap(existing.FinalPathEvidence, candidate.FinalPathEvidence) {
+			return fmt.Errorf("%w: provider %s", ErrProviderRootOverlap, existing.ID)
+		}
+	}
+	return nil
+}
+
+func samePhysicalRoot(a, b domain.ProviderRoot) bool {
+	if a.IdentityConfidence == domain.RootIdentityWeak || b.IdentityConfidence == domain.RootIdentityWeak ||
+		a.IdentityConfidence == domain.RootIdentityLegacy || b.IdentityConfidence == domain.RootIdentityLegacy {
+		return false
+	}
+	return (a.PhysicalIdentity != "" && a.PhysicalIdentity == b.PhysicalIdentity) ||
+		(a.FallbackIdentity != "" && a.FallbackIdentity == b.FallbackIdentity)
+}
+
+func rootPathsOverlap(a, b string) bool {
+	if a == "" || b == "" {
+		return false
+	}
+	windowsStyle := strings.HasPrefix(a, `\\`) || strings.HasPrefix(b, `\\`) ||
+		(len(a) >= 2 && a[1] == ':') || (len(b) >= 2 && b[1] == ':')
+	separator := "/"
+	if windowsStyle {
+		a = strings.ReplaceAll(a, "/", `\`)
+		b = strings.ReplaceAll(b, "/", `\`)
+		separator = `\`
+	}
+	a = trimRootSeparator(a, separator)
+	b = trimRootSeparator(b, separator)
+	equal := func(x, y string) bool {
+		if windowsStyle {
+			return strings.EqualFold(x, y)
+		}
+		return x == y
+	}
+	if equal(a, b) {
+		return true
+	}
+	if len(a) < len(b) && equal(b[:len(a)], a) && strings.HasPrefix(b[len(a):], separator) {
+		return true
+	}
+	return len(b) < len(a) && equal(a[:len(b)], b) && strings.HasPrefix(a[len(b):], separator)
+}
+
+func trimRootSeparator(path, separator string) string {
+	trimmed := strings.TrimRight(path, separator)
+	if trimmed == "" {
+		return separator
+	}
+	return trimmed
 }
 
 func (s *Store) BeginScan(ctx context.Context, providerID string, started time.Time) error {

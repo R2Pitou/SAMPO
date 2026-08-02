@@ -6,9 +6,11 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"sampo/internal/catalog"
+	"sampo/internal/domain"
 )
 
 func TestMilestoneOneJourneyLeavesSourceUntouched(t *testing.T) {
@@ -92,5 +94,94 @@ func TestMilestoneOneJourneyLeavesSourceUntouched(t *testing.T) {
 		if appearance.Availability != "available" {
 			t.Fatalf("appearance remained %q after successful reconnect scan", appearance.Availability)
 		}
+	}
+}
+
+type fixedRootProber struct {
+	root domain.ProviderRoot
+	err  error
+}
+
+func (p fixedRootProber) Probe(submitted string) (domain.ProviderRoot, error) {
+	root := p.root
+	root.SubmittedLocator = submitted
+	return root, p.err
+}
+
+func TestWeakProviderIdentityIsCatalogueOnly(t *testing.T) {
+	ctx := context.Background()
+	store, err := catalog.Open(ctx, filepath.Join(t.TempDir(), "catalogue.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	service := newWithRootProber(store, fixedRootProber{root: domain.ProviderRoot{
+		OperationalLocator: `\\server\share\root`,
+		FinalPathEvidence:  `\\server\share\root`,
+		IdentityConfidence: domain.RootIdentityWeak,
+		CatalogueOnly:      true,
+	}})
+	provider, err := service.EnrollFilesystem(ctx, "Weak remote", `\\server\share\root`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !provider.CatalogueOnly || provider.IdentityConfidence != domain.RootIdentityWeak {
+		t.Fatalf("weak provider = %#v", provider.ProviderRoot)
+	}
+}
+
+type sequenceRootProber struct {
+	mu    sync.Mutex
+	roots []domain.ProviderRoot
+	next  int
+}
+
+func (p *sequenceRootProber) Probe(submitted string) (domain.ProviderRoot, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	index := p.next
+	if index >= len(p.roots) {
+		index = len(p.roots) - 1
+	}
+	p.next++
+	root := p.roots[index]
+	root.SubmittedLocator = submitted
+	return root, nil
+}
+
+func TestScanRejectsRootIdentityChangeDuringEnumeration(t *testing.T) {
+	ctx := context.Background()
+	rootPath := t.TempDir()
+	if err := os.WriteFile(filepath.Join(rootPath, "untrusted.txt"), []byte("bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base := domain.ProviderRoot{
+		OperationalLocator: rootPath, FinalPathEvidence: rootPath,
+		PhysicalIdentity: "physical-before", FallbackIdentity: "fallback-before",
+		IdentityConfidence: domain.RootIdentityStrong,
+	}
+	after := base
+	after.PhysicalIdentity = "physical-after"
+	after.FallbackIdentity = "fallback-after"
+	prober := &sequenceRootProber{roots: []domain.ProviderRoot{base, base, after}}
+	store, err := catalog.Open(ctx, filepath.Join(t.TempDir(), "catalogue.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	service := newWithRootProber(store, prober)
+	provider, err := service.EnrollFilesystem(ctx, "Swap test", rootPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Scan(ctx, provider.ID); err == nil {
+		t.Fatal("scan accepted a root identity change during enumeration")
+	}
+	results, err := service.Search(ctx, "untrusted.txt", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("mid-scan replacement observations were reconciled: %#v", results)
 	}
 }

@@ -36,6 +36,21 @@ No copying, deletion, managed custody, S3 integration, or automatic repair.
 
 Demonstrates AT-01, AT-02, AT-04, AT-05, the loopback portion of AT-21, and the Windows-host portion of AT-28.
 
+## Milestone 1.1: Provider root identity safety
+
+**Status:** Complete - 2026-08-03
+
+Deliver:
+
+- Platform-neutral filesystem root identity evidence with explicit confidence.
+- Windows identity from an opened directory handle, preferring `FILE_ID_INFO` and retaining fallback evidence.
+- Separate submitted, operational, final-path, and physical-identity evidence in Seshat.
+- Transactional rejection of physical aliases and parent/child provider overlap.
+- Root identity verification before and after each scan.
+- Catalogue-only authority for weak remote identity.
+
+This milestone prevents one physical filesystem occurrence from masquerading as multiple Providers. It does not implement Provider-local `.sampo` identity, automatic reconnect, clone adjudication, Failure Domain evidence, managed custody, or destructive authority; those remain in later milestones.
+
 ## Milestone 2: Enrollment and portable provider memory
 
 Deliver:

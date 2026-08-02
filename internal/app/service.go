@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -14,51 +13,46 @@ import (
 	"sampo/internal/catalog"
 	"sampo/internal/domain"
 	"sampo/internal/observer"
+	"sampo/internal/rootidentity"
 )
 
 type Service struct {
 	store   *catalog.Store
 	scanner observer.Scanner
+	roots   rootidentity.Prober
 	mu      sync.Mutex
 	running map[string]bool
 }
 
 func New(store *catalog.Store) *Service {
+	return newWithRootProber(store, rootidentity.SystemProber{})
+}
+
+func newWithRootProber(store *catalog.Store, roots rootidentity.Prober) *Service {
 	return &Service{
 		store:   store,
 		scanner: observer.Scanner{HashRetries: 2},
+		roots:   roots,
 		running: make(map[string]bool),
 	}
 }
 
 func (s *Service) EnrollFilesystem(ctx context.Context, displayName, root string) (domain.Provider, error) {
-	root = strings.TrimSpace(root)
 	if root == "" {
 		return domain.Provider{}, errors.New("provider root is required")
 	}
-	absolute, err := filepath.Abs(root)
+	evidence, err := s.roots.Probe(root)
 	if err != nil {
-		return domain.Provider{}, fmt.Errorf("resolve provider root: %w", err)
-	}
-	resolved, err := filepath.EvalSymlinks(absolute)
-	if err != nil {
-		return domain.Provider{}, fmt.Errorf("resolve provider root: %w", err)
-	}
-	info, err := os.Stat(resolved)
-	if err != nil {
-		return domain.Provider{}, fmt.Errorf("inspect provider root: %w", err)
-	}
-	if !info.IsDir() {
-		return domain.Provider{}, errors.New("provider root must be a directory")
+		return domain.Provider{}, err
 	}
 	displayName = strings.TrimSpace(displayName)
 	if displayName == "" {
-		displayName = filepath.Base(resolved)
+		displayName = filepath.Base(evidence.OperationalLocator)
 		if displayName == "." || displayName == string(filepath.Separator) || displayName == "" {
-			displayName = resolved
+			displayName = evidence.OperationalLocator
 		}
 	}
-	return s.store.AddFilesystemProvider(ctx, displayName, filepath.Clean(resolved))
+	return s.store.AddFilesystemProvider(ctx, displayName, evidence)
 }
 
 func (s *Service) Scan(ctx context.Context, providerID string) (domain.ScanSummary, error) {
@@ -86,10 +80,34 @@ func (s *Service) Scan(ctx context.Context, providerID string) (domain.ScanSumma
 	if err := s.store.BeginScan(ctx, providerID, started); err != nil {
 		return domain.ScanSummary{}, err
 	}
-	result, err := s.scanner.Scan(ctx, provider.RootLocator)
+	currentRoot, err := s.roots.Probe(provider.SubmittedLocator)
+	if err == nil && provider.IdentityConfidence == domain.RootIdentityLegacy {
+		err = s.store.EstablishProviderRoot(ctx, providerID, currentRoot)
+		if err == nil {
+			provider.ProviderRoot = currentRoot
+		}
+	}
+	if err == nil {
+		err = rootidentity.Verify(provider.ProviderRoot, currentRoot)
+	}
+	if err != nil {
+		wrapped := fmt.Errorf("verify provider root before scan: %w", err)
+		_ = s.store.FailScan(context.WithoutCancel(ctx), providerID, time.Now().UTC(), wrapped)
+		return domain.ScanSummary{}, wrapped
+	}
+	result, err := s.scanner.Scan(ctx, currentRoot.OperationalLocator)
 	if err != nil {
 		_ = s.store.FailScan(context.WithoutCancel(ctx), providerID, time.Now().UTC(), err)
 		return domain.ScanSummary{}, err
+	}
+	afterRoot, err := s.roots.Probe(provider.SubmittedLocator)
+	if err == nil {
+		err = rootidentity.Verify(provider.ProviderRoot, afterRoot)
+	}
+	if err != nil {
+		wrapped := fmt.Errorf("verify provider root after scan: %w", err)
+		_ = s.store.FailScan(context.WithoutCancel(ctx), providerID, time.Now().UTC(), wrapped)
+		return domain.ScanSummary{}, wrapped
 	}
 	if err := s.store.ReconcileScan(ctx, providerID, result); err != nil {
 		_ = s.store.FailScan(context.WithoutCancel(ctx), providerID, time.Now().UTC(), err)

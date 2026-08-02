@@ -2,8 +2,11 @@ package catalog
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,7 +22,7 @@ func TestOpenUsesDurableRollbackConfiguration(t *testing.T) {
 		{"PRAGMA journal_mode", "delete"},
 		{"PRAGMA synchronous", "2"},
 		{"PRAGMA foreign_keys", "1"},
-		{"PRAGMA user_version", "1"},
+		{"PRAGMA user_version", "2"},
 		{"SELECT sqlite_version()", "3.53.3"},
 	}
 	for _, check := range checks {
@@ -45,10 +48,37 @@ func TestOpenRejectsCorruptCatalogue(t *testing.T) {
 	}
 }
 
+func TestProviderRootEvidencePersistsSeparatelyAndExactly(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	root := domain.ProviderRoot{
+		SubmittedLocator:   `\\?\C:\Submitted Provider Root `,
+		OperationalLocator: `\\?\C:\Operational Provider Root`,
+		FinalPathEvidence:  `\\?\Volume{test}\Final Provider Root`,
+		PhysicalIdentity:   "windows:file-id128:volume:file",
+		FallbackIdentity:   "windows:file-index64:volume:file",
+		IdentityConfidence: domain.RootIdentityStrong,
+	}
+	created, err := store.AddFilesystemProvider(ctx, "Evidence", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := store.Provider(ctx, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ProviderRoot != root {
+		t.Fatalf("persisted root evidence = %#v, want %#v", loaded.ProviderRoot, root)
+	}
+	if loaded.RootLocator != root.SubmittedLocator {
+		t.Fatalf("compatibility root locator = %q, want submitted locator %q", loaded.RootLocator, root.SubmittedLocator)
+	}
+}
+
 func TestReconcileGroupsDuplicatesAndPreservesRenameContinuity(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	provider, err := store.AddFilesystemProvider(ctx, "Test", t.TempDir())
+	provider, err := store.AddFilesystemProvider(ctx, "Test", testProviderRoot(t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +136,7 @@ func TestReconcileGroupsDuplicatesAndPreservesRenameContinuity(t *testing.T) {
 func TestReconcileDoesNotReuseAppearanceForChangedBytes(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	provider, err := store.AddFilesystemProvider(ctx, "Test", t.TempDir())
+	provider, err := store.AddFilesystemProvider(ctx, "Test", testProviderRoot(t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +180,7 @@ func TestReconcileDoesNotReuseAppearanceForChangedBytes(t *testing.T) {
 func TestReconcileUsesOneToOneExactHashAsProbableRename(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	provider, err := store.AddFilesystemProvider(ctx, "Test", t.TempDir())
+	provider, err := store.AddFilesystemProvider(ctx, "Test", testProviderRoot(t.TempDir()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,6 +203,142 @@ func TestReconcileUsesOneToOneExactHashAsProbableRename(t *testing.T) {
 	}
 }
 
+func TestProviderEnrollmentRejectsPhysicalDuplicateAndOverlap(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	first := domain.ProviderRoot{
+		SubmittedLocator: `C:\Data`, OperationalLocator: `\\?\C:\Data`,
+		FinalPathEvidence: `\\?\Volume{test}\Data`, PhysicalIdentity: "physical-root",
+		FallbackIdentity: "fallback-root", IdentityConfidence: domain.RootIdentityStrong,
+	}
+	if _, err := store.AddFilesystemProvider(ctx, "First", first); err != nil {
+		t.Fatal(err)
+	}
+
+	alias := first
+	alias.SubmittedLocator = `\\?\C:\Data`
+	alias.OperationalLocator = alias.SubmittedLocator
+	if _, err := store.AddFilesystemProvider(ctx, "Alias", alias); !errors.Is(err, ErrProviderRootDuplicate) {
+		t.Fatalf("physical alias error = %v, want duplicate", err)
+	}
+
+	child := domain.ProviderRoot{
+		SubmittedLocator: `C:\Data\Child`, OperationalLocator: `\\?\C:\Data\Child`,
+		FinalPathEvidence: `\\?\Volume{test}\Data\Child`, PhysicalIdentity: "physical-child",
+		FallbackIdentity: "fallback-child", IdentityConfidence: domain.RootIdentityStrong,
+	}
+	if _, err := store.AddFilesystemProvider(ctx, "Child", child); !errors.Is(err, ErrProviderRootOverlap) {
+		t.Fatalf("child overlap error = %v, want overlap", err)
+	}
+
+	parent := domain.ProviderRoot{
+		SubmittedLocator: `C:\`, OperationalLocator: `\\?\C:\`,
+		FinalPathEvidence: `\\?\Volume{test}\`, PhysicalIdentity: "physical-parent",
+		FallbackIdentity: "fallback-parent", IdentityConfidence: domain.RootIdentityStrong,
+	}
+	if _, err := store.AddFilesystemProvider(ctx, "Parent", parent); !errors.Is(err, ErrProviderRootOverlap) {
+		t.Fatalf("parent overlap error = %v, want overlap", err)
+	}
+}
+
+func TestProviderEnrollmentSerializesConcurrentPhysicalAliases(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	roots := []domain.ProviderRoot{
+		{
+			SubmittedLocator: `C:\Concurrent`, OperationalLocator: `\\?\C:\Concurrent`,
+			FinalPathEvidence: `\\?\Volume{test}\Concurrent`, PhysicalIdentity: "same-physical",
+			FallbackIdentity: "same-fallback", IdentityConfidence: domain.RootIdentityStrong,
+		},
+		{
+			SubmittedLocator: `\\?\C:\Concurrent`, OperationalLocator: `\\?\C:\Concurrent`,
+			FinalPathEvidence: `\\?\Volume{test}\Concurrent`, PhysicalIdentity: "same-physical",
+			FallbackIdentity: "same-fallback", IdentityConfidence: domain.RootIdentityStrong,
+		},
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, len(roots))
+	for i, root := range roots {
+		wg.Add(1)
+		go func(i int, root domain.ProviderRoot) {
+			defer wg.Done()
+			_, err := store.AddFilesystemProvider(ctx, "Concurrent", root)
+			errs <- err
+		}(i, root)
+	}
+	wg.Wait()
+	close(errs)
+	var succeeded, rejected int
+	for err := range errs {
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, ErrProviderRootDuplicate):
+			rejected++
+		default:
+			t.Fatalf("unexpected enrollment error: %v", err)
+		}
+	}
+	if succeeded != 1 || rejected != 1 {
+		t.Fatalf("succeeded=%d rejected=%d, want 1/1", succeeded, rejected)
+	}
+}
+
+func TestWeakRemoteEvidenceDoesNotCreateFalsePhysicalDuplicates(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	for _, locator := range []string{`\\server\share\one`, `\\server\share\two`} {
+		root := domain.ProviderRoot{
+			SubmittedLocator: locator, OperationalLocator: locator, FinalPathEvidence: locator,
+			PhysicalIdentity:   "windows:file-id128:0000000000000000:00000000000000000000000000000000",
+			FallbackIdentity:   "windows:file-index64:00000000:0000000000000000",
+			IdentityConfidence: domain.RootIdentityWeak, CatalogueOnly: true,
+		}
+		if _, err := store.AddFilesystemProvider(ctx, "Weak", root); err != nil {
+			t.Fatalf("weak root %q was rejected using unreliable physical evidence: %v", locator, err)
+		}
+	}
+}
+
+func TestMigrationMarksExistingProviderIdentityLegacyAndCatalogueOnly(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "catalogue.sqlite3")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(migrationV1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO providers
+        (id, kind, display_name, root_locator, created_at_ns, scan_status)
+        VALUES ('legacy', 'filesystem', 'Legacy', 'C:\Legacy', 1, 'never-scanned')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("PRAGMA user_version=1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	provider, err := store.Provider(ctx, "legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.IdentityConfidence != domain.RootIdentityLegacy || !provider.CatalogueOnly {
+		t.Fatalf("migrated provider identity = %#v", provider.ProviderRoot)
+	}
+	if provider.SubmittedLocator != `C:\Legacy` || provider.OperationalLocator != `C:\Legacy` {
+		t.Fatalf("migrated locators = %#v", provider.ProviderRoot)
+	}
+}
+
 func openTestStore(t *testing.T) *Store {
 	t.Helper()
 	store, err := Open(context.Background(), filepath.Join(t.TempDir(), "catalogue.sqlite3"))
@@ -181,6 +347,15 @@ func openTestStore(t *testing.T) *Store {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	return store
+}
+
+func testProviderRoot(path string) domain.ProviderRoot {
+	path = filepath.Clean(path)
+	return domain.ProviderRoot{
+		SubmittedLocator: path, OperationalLocator: path, FinalPathEvidence: path,
+		PhysicalIdentity: "test:" + path, FallbackIdentity: "test-fallback:" + path,
+		IdentityConfidence: domain.RootIdentityStrong,
+	}
 }
 
 func testScan(observations ...domain.FileObservation) domain.ProviderScan {

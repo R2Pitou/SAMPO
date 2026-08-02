@@ -6,13 +6,29 @@ const (
 	DigestSHA256       = "sha256"
 	CustodyUserOwned   = "user-owned"
 	ProviderFilesystem = "filesystem"
+
+	RootIdentityStrong   = "strong"
+	RootIdentityFallback = "fallback"
+	RootIdentityWeak     = "weak"
+	RootIdentityLegacy   = "legacy-unverified"
 )
 
+type ProviderRoot struct {
+	SubmittedLocator   string `json:"submittedLocator"`
+	OperationalLocator string `json:"operationalLocator"`
+	FinalPathEvidence  string `json:"finalPathEvidence,omitempty"`
+	PhysicalIdentity   string `json:"physicalIdentity,omitempty"`
+	FallbackIdentity   string `json:"fallbackIdentity,omitempty"`
+	IdentityConfidence string `json:"identityConfidence"`
+	CatalogueOnly      bool   `json:"catalogueOnly"`
+}
+
 type Provider struct {
-	ID              string     `json:"id"`
-	Kind            string     `json:"kind"`
-	DisplayName     string     `json:"displayName"`
-	RootLocator     string     `json:"rootLocator"`
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	DisplayName string `json:"displayName"`
+	RootLocator string `json:"rootLocator"` // Compatibility alias for SubmittedLocator.
+	ProviderRoot
 	CreatedAt       time.Time  `json:"createdAt"`
 	LastScanStarted *time.Time `json:"lastScanStarted,omitempty"`
 	LastScanEnded   *time.Time `json:"lastScanEnded,omitempty"`

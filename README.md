@@ -24,7 +24,7 @@ Removing SAMPO must leave committed files readable through ordinary provider-nat
 
 SAMPO is rebuilding from the deliberate Great Reset. The architecture is frozen and **Milestone 1—the read-only filesystem catalogue—is implemented** in Go for the Windows control plane. It is an engineering milestone, not yet a production release.
 
-The current implementation can enroll a filesystem directory without modifying it, perform complete stable SHA-256 hashing, group exact duplicates as Appearances of one Content item, preserve rename continuity where evidence permits, search by name or path, and serve the catalogue through a secured loopback-only browser UI. Every discovered Appearance remains user-owned.
+The current implementation can enroll a filesystem directory without modifying it, perform complete stable SHA-256 hashing, group exact duplicates as Appearances of one Content item, preserve rename continuity where evidence permits, search by name or path, and serve the catalogue through a secured loopback-only browser UI. Windows enrollment records handle-derived root identity evidence, rejects physical aliases and overlapping roots, and revalidates the root before and after every scan. Weak remote identity is catalogue-only. Every discovered Appearance remains user-owned.
 
 Copy creation, managed custody, Protection Contracts, durable Boatman Jobs, Provider-local `.sampo` metadata, S3, deletion, and repair remain unimplemented and unavailable.
 
@@ -155,4 +155,4 @@ go vet ./...
 go build ./cmd/sampo
 ```
 
-The test suite covers provider non-mutation, complete hashing, exact duplicate grouping, rename continuity, changed-byte history, SQLite durability settings and corruption rejection, session bootstrap, Host and Origin enforcement, CSRF protection, and the Milestone 1 journey.
+The test suite covers provider non-mutation, complete hashing, exact duplicate grouping, rename continuity, changed-byte history, provider-root alias and overlap rejection, scan-time root replacement detection, SQLite durability settings and corruption rejection, session bootstrap, Host and Origin enforcement, CSRF protection, and the Milestone 1 journey.
