@@ -18,7 +18,7 @@ Enroll a filesystem provider containing user files and perform discovery, hashin
 
 Enroll a USB, find Content, approve one managed copy, verify it, and disconnect the USB.
 
-**Pass:** Search returns one Content item; USB Appearance is unavailable, not deleted; managed Appearance is available; Open routes to it.
+**Pass:** Search returns one Content item; USB Appearance is unavailable, not deleted; managed Appearance is available; Open routes to it; no replacement is scheduled merely because the USB is disconnected.
 
 ## AT-04: Five idiot copies
 
@@ -58,7 +58,7 @@ After AT-08, reconnect a provider containing exact Content A.
 
 ## AT-10: Externally deleted managed copy
 
-Fulfill a two-managed-copy Contract, then externally delete one while exact source bytes remain accessible.
+Fulfill a two-managed-copy Contract, then externally delete one and positively confirm its absence while exact source bytes remain accessible.
 
 **Pass:** The Contract remains active; SAMPO observes the missing Appearance and recreates and verifies a replacement without repeated approval; activity explains why.
 
@@ -134,6 +134,73 @@ For committed filesystem and S3-compatible copies, remove SAMPO processes and me
 
 **Pass:** Content is available without SAMPO decoding.
 
+## AT-23: Providers are not Failure Domains
+
+Register a filesystem Provider and a local S3-compatible Provider whose backing data resides on the same physical disk. Request unconstrained **Keep two copies**.
+
+**Pass:**
+
+- SAMPO represents or establishes the shared Failure Domain separately from the two Provider identities;
+- the two Providers do not satisfy two-domain protection;
+- the Contract remains unfulfilled and the Plan explains the shared loss boundary;
+- moving or adding an eligible destination in an independently established Failure Domain allows fulfillment;
+- unknown independence is not treated as proven independence.
+
+## AT-24: Explicit weaker same-domain protection
+
+With only one eligible Failure Domain, review a Plan for two distinct managed instances within that domain.
+
+**Pass:**
+
+- the ordinary unconstrained Plan remains unfulfilled;
+- the weaker alternative is clearly labeled as reduced protection;
+- it requires explicit approval as a material Contract term;
+- after approval, two distinct verified committed managed Appearances can satisfy that weaker Contract;
+- aliases or multiple locators for one underlying storage instance do not count as two.
+
+## AT-25: Unavailable and surplus are not deletion targets
+
+Start with a Contract requiring a minimum of two managed Appearances across independent Failure Domains and three qualifying managed Appearances present.
+
+**Pass:**
+
+- SAMPO reports two required and one surplus;
+- it creates no automatic retirement Job;
+- disconnecting one Provider reports that Appearance as known but currently unverifiable, not missing;
+- disconnection alone creates no replacement Job;
+- reconnect and verification restore current confidence;
+- replacement becomes eligible only after positive missing or invalid evidence.
+
+## AT-26: Readable managed layout survives renames and collisions
+
+Approve a managed filesystem copy whose first relative path is `Project/Mix.wav`. Then rename the user-owned source and create a second different Content item that would map to the same destination name.
+
+**Pass:**
+
+- the committed copy is an ordinary file beneath `library/Project/Mix.wav` or a deterministic Provider-safe spelling;
+- it opens with a native tool after SAMPO is stopped;
+- the later source rename updates catalogue evidence without renaming the committed copy;
+- the collision publishes the second file under a deterministic readable disambiguated name, preserving `.wav`, and never overwrites the first;
+- machine staging and metadata remain under `.sampo/`.
+
+## AT-27: A manually placed file is not silently adopted
+
+Place a file manually beneath `library/` without a SAMPO creation Job.
+
+**Pass:** SAMPO records it as user-owned and offers **Adopt**, **Leave it mine**, and **Ask later**. Leave and Ask preserve user custody. Adopt transfers custody only after explicit approval, stable-byte verification, applicable Contract handling, and an audit event. A file changed during adoption remains user-owned and requires a refreshed decision.
+
+## AT-28: Windows control plane and Ubuntu S3 participation
+
+Run the SAMPO control plane and loopback UI on Windows and enroll an S3-compatible service hosted on Ubuntu Server.
+
+**Pass:** the complete MVP journey works without a Linux SAMPO control-plane process; ordinary S3 tools can retrieve committed bytes after SAMPO stops; Windows-specific integration remains outside the domain and Provider contracts.
+
+## AT-29: Usage reporting is factual, not a billing authority
+
+Perform filesystem and S3-compatible transfers, including a quota or billing-related Provider failure where the test service can simulate one.
+
+**Pass:** SAMPO reports measured bytes, operations where exposed, dated transfer history, and factual Provider failures with provenance. It displays no currency estimate, claims no budget enforcement, and enrollment of a paid Provider warns the user to configure Provider-side budgets and alerts.
+
 ## Cross-cutting test requirements
 
 - Run provider-contract tests against both provider classes.
@@ -142,3 +209,7 @@ For committed filesystem and S3-compatible copies, remove SAMPO processes and me
 - Test case-insensitive collisions, illegal names, exhausted destinations, disconnected providers, and changed source evidence.
 - Verify that raw observations cannot directly authorize custody, deletion, or Contract fulfillment.
 - Verify every state-changing UI action produces an explainable Plan, approved Job, or explicit rejection.
+- Verify Provider count never substitutes for established Failure Domain independence.
+- Verify Contract reports distinguish available, unavailable, confirmed missing/invalid, and surplus managed Appearances.
+- Verify layout and adoption behavior cannot turn directory location into custody.
+- Verify factual usage views never imply a complete bill or a SAMPO-enforced budget.

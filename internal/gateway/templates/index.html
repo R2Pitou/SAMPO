@@ -1,0 +1,100 @@
+{{define "index.html"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{.CSRF}}">
+  <title>SAMPO</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <div>
+      <p class="eyebrow">Storage Abstraction Management &amp; Policy Orchestrator</p>
+      <h1>SAMPO</h1>
+    </div>
+    <p class="status">Local catalogue · read-only milestone</p>
+  </header>
+
+  <main>
+    {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+    <section class="stats" aria-label="Catalogue summary">
+      <article><strong>{{.Stats.Contents}}</strong><span>exact contents</span></article>
+      <article><strong>{{.Stats.AvailableFiles}}</strong><span>available files</span></article>
+      <article><strong>{{.Stats.UnavailableFiles}}</strong><span>unavailable files</span></article>
+      <article><strong>{{.Stats.Providers}}</strong><span>providers</span></article>
+    </section>
+
+    <section class="panel search-panel">
+      <h2>Find ordinary files</h2>
+      <form method="get" action="/" class="search-form">
+        <label for="q">Name or path</label>
+        <div class="row">
+          <input id="q" name="q" value="{{.Query}}" maxlength="512" autocomplete="off" autofocus>
+          <button type="submit">Search</button>
+        </div>
+      </form>
+    </section>
+
+    {{if .Query}}
+    <section class="panel">
+      <h2>Results for “{{.Query}}”</h2>
+      {{if .Results}}
+        <div class="results">
+        {{range .Results}}
+          <article class="result">
+            <div class="result-heading">
+              <h3>{{(index .Appearances 0).DisplayName}}</h3>
+              <span>{{formatBytes .Content.ByteLength}}</span>
+            </div>
+            <p class="digest">sha256:{{shortDigest .Content.DigestHex}}… · {{len .Appearances}} appearance{{if ne (len .Appearances) 1}}s{{end}}</p>
+            <ul>
+              {{range .Appearances}}
+              <li>
+                <code>{{.Locator}}</code>
+                <span class="badge">{{.Availability}}</span>
+                <span class="badge quiet">{{.Custody}}</span>
+                {{if or (eq .Continuity "confirmed-rename") (eq .Continuity "probable-rename")}}<span class="badge continuity">{{.Continuity}}</span>{{end}}
+              </li>
+              {{end}}
+            </ul>
+          </article>
+        {{end}}
+        </div>
+      {{else}}<p>No matching files are known yet.</p>{{end}}
+    </section>
+    {{end}}
+
+    <section class="panel">
+      <div class="section-heading">
+        <div><h2>Filesystem providers</h2><p>Enrollment and scanning never modify provider files.</p></div>
+      </div>
+      {{if .Providers}}
+      <ul class="providers">
+        {{range .Providers}}
+        <li>
+          <div><strong>{{.DisplayName}}</strong><code>{{.RootLocator}}</code></div>
+          <div class="provider-actions">
+            <span class="badge">{{.ScanStatus}}</span>
+            <button type="button" data-scan-provider="{{.ID}}">Scan</button>
+          </div>
+        </li>
+        {{end}}
+      </ul>
+      {{else}}<p>No providers enrolled.</p>{{end}}
+
+      <form id="enroll-provider" class="enroll-form">
+        <h3>Enroll a directory</h3>
+        <label for="provider-name">Display name <span>(optional)</span></label>
+        <input id="provider-name" name="displayName" maxlength="200">
+        <label for="provider-root">Absolute directory path</label>
+        <input id="provider-root" name="root" required maxlength="32767" placeholder="D:\Media">
+        <button type="submit">Enroll and scan</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>
+{{end}}

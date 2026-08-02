@@ -11,6 +11,7 @@ These capabilities are not rejected forever. They are excluded from the MVP and 
 - Block-level virtualization.
 - Proprietary containers as the sole data representation.
 - Automatic deletion of user-owned data.
+- Automatic retirement of managed Appearances merely because they exceed a Contract minimum.
 
 ## Synchronization and version control
 
@@ -41,6 +42,7 @@ These capabilities are not rejected forever. They are excluded from the MVP and 
 - Git or GitHub providers.
 - Another SAMPO node as a provider.
 - Cloud billing optimization.
+- SAMPO currency-bill estimation or Provider-budget enforcement.
 
 ## Intelligence and search
 

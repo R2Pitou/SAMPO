@@ -22,9 +22,11 @@ Removing SAMPO must leave committed files readable through ordinary provider-nat
 
 ## Current status
 
-SAMPO is in an architecture-first MVP phase following a deliberate implementation reset. There is currently no production implementation, build command, runtime configuration, public API, or selected programming language.
+SAMPO is rebuilding from the deliberate Great Reset. The architecture is frozen and **Milestone 1—the read-only filesystem catalogue—is implemented** in Go for the Windows control plane. It is an engineering milestone, not yet a production release.
 
-The architecture is being documented before implementation so custody, identity, Contracts, provider behavior, failure recovery, and destructive authority are explicit and testable.
+The current implementation can enroll a filesystem directory without modifying it, perform complete stable SHA-256 hashing, group exact duplicates as Appearances of one Content item, preserve rename continuity where evidence permits, search by name or path, and serve the catalogue through a secured loopback-only browser UI. Every discovered Appearance remains user-owned.
+
+Copy creation, managed custody, Protection Contracts, durable Boatman Jobs, Provider-local `.sampo` metadata, S3, deletion, and repair remain unimplemented and unavailable.
 
 ## Approved MVP
 
@@ -46,7 +48,9 @@ The MVP proves genuine provider abstraction with:
 - a mounted hierarchical filesystem provider; and
 - an S3-compatible object-storage provider used as object storage rather than a fake drive.
 
-No specific S3-compatible implementation or other technology has been selected yet.
+The accepted implementation ADRs select Go, SQLite, AWS SDK for Go v2, and a pinned SeaweedFS development service while keeping Provider contracts independent of those choices.
+
+Windows hosts the first SAMPO control plane. Ubuntu Server participates first through S3-compatible storage. Linux control-plane support remains a portability goal rather than an MVP requirement.
 
 ## Core concepts
 
@@ -54,12 +58,23 @@ No specific S3-compatible implementation or other technology has been selected y
 - **Appearance:** one occurrence of Content at a provider-native opaque locator.
 - **Custody:** user-owned or SAMPO-managed authority over an Appearance, established by provenance or explicit adoption—never by path.
 - **Protection Contract:** a persistent approved obligation over exact Content.
+- **Failure Domain:** an explicitly represented loss boundary shared by one or more Providers or storage instances; Provider identity alone does not establish independence.
 - **Plan:** an explainable proposal without execution authority until approved.
 - **Job:** a durable, retryable, idempotent unit of already authorized work.
 - **Observation:** untrusted evidence from a provider or watcher.
 - **Catalogue Fact:** a reconciled statement Seshat currently accepts.
 
 The MVP has no canonical copy. Read and edit access are routed per operation among eligible verified Appearances.
+
+An unconstrained **Keep two copies** Contract requires at least two distinct, verified, committed SAMPO-managed Appearances across two independent failure domains. A filesystem Provider and an S3-compatible Provider can still share one failure domain when both ultimately use the same disk. If independent placement is unavailable, the Contract remains unfulfilled unless the user explicitly approves the weaker same-domain alternative.
+
+Unavailable is not missing. SAMPO reports an unavailable managed Appearance as currently unverifiable and does not replace it merely because its Provider disconnected. Surplus managed Appearances above a required minimum are reported but not automatically removed.
+
+Filesystem-managed copies remain human-readable under `library/`, using the first approved relative path. Machine metadata and staging remain under `.sampo/`. Later source renames update Seshat rather than silently rebuilding managed paths.
+
+A file manually placed under `library/` remains user-owned. SAMPO offers **Adopt**, **Leave it mine**, or **Ask later**; only explicit adoption transfers custody.
+
+SAMPO reports factual Provider usage and failures but does not estimate cloud bills or enforce Provider budgets. Paid-Provider budgets and billing alerts remain Provider-side controls.
 
 ## Staff responsibilities
 
@@ -105,13 +120,39 @@ Read in this order:
 1. [Manifesto](MANIFESTO.md)
 2. [Product specification](Spec.md)
 3. [MVP architecture decisions](MVP-ARCHITECTURE-DECISIONS.md)
-4. [MVP architecture](MVP-ARCHITECTURE.md)
-5. [MVP acceptance tests](MVP-ACCEPTANCE-TESTS.md)
-6. [Implementation milestones](IMPLEMENTATION-MILESTONES.md)
-7. [Parking Lot](PARKING-LOT.md)
+4. [Implementation ADR ownership](SAMPO-IMPLEMENTATION-ADR-OWNERSHIP.md)
+5. [Implementation ADRs](IMPLEMENTATION-ADRS.md)
+6. [MVP architecture](MVP-ARCHITECTURE.md)
+7. [MVP acceptance tests](MVP-ACCEPTANCE-TESTS.md)
+8. [Implementation milestones](IMPLEMENTATION-MILESTONES.md)
+9. [Parking Lot](PARKING-LOT.md)
 
 The historical [architecture decision handoff](mash-mvp-architecture-decision-record-and-codex-handoff.md) records the meeting that established these decisions. It predates the final product-naming correction and therefore contains the retired working title **MAS-H**.
 
+The historical [Great Reset audit](sol-audit.md) is non-authoritative archaeology. It predates the approved decisions and naming correction and must not be used as current implementation guidance.
+
 ## Implementation status
 
-Implementation has not begun. Technology and dependency choices will be recorded separately only when a milestone requires them, with alternatives, safety consequences, portability consequences, build-versus-integrate reasoning, and acceptance-test evidence.
+Milestone 1 uses Go 1.26, `net/http`, server-rendered HTML, SQLite through `modernc.org/sqlite`, and Windows handle identity through `golang.org/x/sys/windows`.
+
+Run the local development application:
+
+```powershell
+go run ./cmd/sampo
+```
+
+SAMPO binds to an operating-system-assigned `127.0.0.1` port, opens a one-time bootstrap URL in the default browser, and stores its home catalogue under the current user's local application-data directory. For an isolated development catalogue without automatic browser launch:
+
+```powershell
+go run ./cmd/sampo -data-dir .sampo-data -no-browser
+```
+
+Verify the implementation:
+
+```powershell
+go test ./...
+go vet ./...
+go build ./cmd/sampo
+```
+
+The test suite covers provider non-mutation, complete hashing, exact duplicate grouping, rename continuity, changed-byte history, SQLite durability settings and corruption rejection, session bootstrap, Host and Origin enforcement, CSRF protection, and the Milestone 1 journey.

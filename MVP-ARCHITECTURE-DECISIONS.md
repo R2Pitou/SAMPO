@@ -1,7 +1,7 @@
 # SAMPO MVP Architecture Decisions
 
 **Status:** Product-owner approved
-**Authority:** `MANIFESTO.md` remains constitutional. This document records the approved MVP decisions and supersedes conflicting provisional language in `Spec.md` and stale material in `README.md`. Decision 14 incorporates the later product-owner naming correction that retired the MAS-H working title.
+**Authority:** `MANIFESTO.md` remains constitutional. This document records the approved MVP decisions and supersedes conflicting provisional language in `Spec.md` and stale material in `README.md`. Decision 14 incorporates the later product-owner naming correction that retired the MAS-H working title. `SAMPO-IMPLEMENTATION-ADR-OWNERSHIP.md` records subsequent product-owner constraints and delegates bounded implementation choices without reopening these decisions.
 
 This document defines product and architecture constraints, not implementation technologies. It does not select a programming language, framework, database engine, object-store implementation, or packaging model.
 
@@ -44,6 +44,22 @@ User-owned appearances do not satisfy a managed-copy count unless explicitly ado
 - **Unfulfillable** when exact bytes are inaccessible or approved terms cannot currently be met.
 
 Reality may make a contract unfulfillable, but only the user may amend or cancel it. If exact Content later returns, SAMPO recognizes it and may resume fulfillment within the already approved terms. Similar, edited, or probable content never satisfies an exact-content contract.
+
+### Copy count and failure domains
+
+An unconstrained **Keep two copies** Contract means:
+
+> Maintain at least two distinct, verified, committed SAMPO-managed Appearances of the exact same Content across two independent failure domains.
+
+The count is a required minimum, not an automatic deletion target. Surplus managed Appearances are reported and remain in place unless a later approved Contract amendment authorizes retirement.
+
+A user-owned Appearance does not count unless explicitly adopted. Planned, staged, partial, unverified, digest-mismatched, or aliased references to the same underlying storage instance do not count.
+
+Provider identity and failure-domain identity are separate. Different Providers do not prove independence: a filesystem Provider and a local S3-compatible Provider may share one physical disk, host, enclosure, or other loss boundary. SAMPO must record or establish the relevant failure-domain relationship separately. Unknown independence does not satisfy an unconstrained multi-copy Contract.
+
+If approved Providers cannot supply two independent failure domains, the Contract remains unfulfilled and SAMPO explains why. The user may approve a materially weaker Plan allowing two distinct managed instances within one failure domain; that exception becomes an explicit Contract term.
+
+Provider unavailability is not deletion. An unavailable managed Appearance remains known but currently unverifiable. It is reported separately from available and confirmed-missing Appearances, and its unavailability alone does not authorize replacement. Replacement occurs only after the Appearance is positively confirmed missing or invalid.
 
 ## 5. Home catalogue and provider-local `.sampo` memory
 
@@ -116,7 +132,7 @@ The MVP supports two genuinely different provider classes:
 1. **Mounted hierarchical filesystem:** ordinary mounted internal, external, USB, or network storage with provider-specific subsets of enumerate, read, create, rename, managed-file removal, native file identity, hierarchy, availability, and performance evidence.
 2. **S3-compatible object storage:** used as object storage, not mounted as a fake drive. It proves key-based addressing, non-directory semantics, remote latency, upload staging, different commit and integrity behavior, lack of inode identity, and transfer cost/availability.
 
-Development must be possible against a disposable local S3-compatible service without a public cloud account. No particular implementation is selected here.
+Development must be possible against a disposable local S3-compatible service without a public cloud account. The first control plane runs on Windows; Ubuntu Server participates first by hosting S3-compatible storage. No particular S3-compatible implementation is selected here.
 
 An ETag or successful upload response alone is not proof of exact equality. A copy satisfies a Contract only after SAMPO verifies its complete digest or an equivalently strong independently validated result. Both classes store ordinary original bytes without a proprietary wrapper as the sole representation.
 
@@ -132,11 +148,11 @@ The browser UI still requires appropriate local session, origin, request-forgery
 
 ## 12. Contract approval authorizes bounded continuous maintenance
 
-One approved Plan creates a Protection Contract and authorizes the work needed to maintain it within its terms. Boatman may stage, retry, resume, verify, clean SAMPO-owned staging, recreate a disappeared managed copy, restore the required managed count, and report the action without asking the same question repeatedly.
+One approved Plan creates a Protection Contract and authorizes the work needed to maintain it within its terms. Boatman may stage, retry, resume, verify, clean SAMPO-owned staging, recreate a positively confirmed missing or invalid managed copy, restore the required managed count and failure-domain constraints, and report the action without asking the same question repeatedly.
 
-New approval is required for a material change: a new provider, unapproved cost, changed copy count, changed durability/location constraint, touching user-owned data, or expansion to unrelated Content. Observations may suggest Contracts but never create them automatically.
+New approval is required for a material change: a new Provider, changed copy count, changed durability/location constraint, touching user-owned data, or expansion to unrelated Content. Enabling a paid Provider makes it eligible within approved Contracts; SAMPO reports factual usage but does not estimate bills or create provider-budget authority. Observations may suggest Contracts but never create them automatically.
 
-External deletion of a required managed Appearance is loss, not contract cancellation. If exact source bytes remain and approved terms permit, SAMPO recreates and verifies it.
+Positive confirmation that a required managed Appearance was deleted or became invalid is loss, not contract cancellation. If exact source bytes remain and approved terms permit, SAMPO recreates and verifies it. Provider disconnection or temporary unavailability is not positive confirmation and does not trigger replacement.
 
 If a managed Appearance is externally edited, SAMPO preserves the edit, transfers that Appearance to user custody, stops counting it for the old Content, and repairs the old Contract only if the old bytes remain accessible. Otherwise the Contract becomes unfulfillable but remains active.
 
@@ -189,9 +205,39 @@ For the MVP, all Staff responsibilities run in one local application with clear 
 
 Staff may use direct queries and commands in-process. Durable domain events record committed facts; event-driven does not mean turning every call into asynchronous messaging.
 
-## Decision boundary still delegated to architecture work
+## 15. Managed-copy layout
 
-Implementation may select, with recorded alternatives and acceptance-test evidence:
+Committed filesystem-managed Appearances use readable paths under `library/`. SAMPO preserves the first relative human-readable path approved for that copy and preserves the original file extension.
+
+Later byte-identical source renames update Seshat’s observed names and locators but do not automatically rebuild the committed managed path. Machine metadata and staging remain under `.sampo/`.
+
+When names collide or a Provider cannot represent the source path exactly, SAMPO applies a deterministic readable disambiguation selected by implementation ADR. Committed files remain directly retrievable without SAMPO. Directory location alone never establishes managed custody; a file manually placed under `library/` remains user-owned until explicit adoption.
+
+## 16. Initial platform topology
+
+Windows hosts the first SAMPO control plane and local browser UI. Ubuntu Server participates first through S3-compatible storage. Linux control-plane support is deferred, while portability remains an architecture constraint.
+
+The implementation ADR selects Windows application lifecycle, volume notifications, file identity, watching, default-application integration, application-data paths, packaging, updates, and privilege boundaries.
+
+## 17. Adoption behavior
+
+A file manually placed in SAMPO-managed space remains user-owned. Observer notices it and SAMPO queues a durable prompt with:
+
+- **Adopt:** explicitly transfer the Appearance into SAMPO custody after verification and any required Contract association.
+- **Leave it mine:** retain user custody and do not ask again for that observed Appearance unless materially changed.
+- **Ask later:** retain user custody and preserve the prompt for later review.
+
+Location is never custody. Adoption must account for changed bytes, multiple potentially relevant Contracts, and the case where no Contract exists. Custody transfer is audited.
+
+## 18. Factual usage reporting
+
+SAMPO reports facts such as bytes stored, uploaded, and downloaded; operation counts where exposed; last successful operations; quota/provider errors; billing-related provider failures; and transfer history.
+
+SAMPO does not estimate currency bills or enforce Provider budgets. Enabling a paid Provider makes it eligible under approved Contract terms. Setup warns the user to configure budgets, quotas, and billing alerts with the Provider.
+
+## Implementation delegation
+
+The product owner delegates the following choices to implementation, with recorded alternatives and acceptance-test evidence. The accepted selections are in `IMPLEMENTATION-ADRS.md`:
 
 - language and web framework;
 - catalogue and provider-ledger storage libraries;

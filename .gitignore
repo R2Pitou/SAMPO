@@ -1,0 +1,5 @@
+# Local SAMPO build and runtime artifacts
+/sampo.exe
+/.tmp-build/
+/.sampo-data/
+/coverage.out

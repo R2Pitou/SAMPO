@@ -22,7 +22,7 @@ The MVP proves:
 
 The MVP does not virtualize blocks, synchronize edits, present a virtual filesystem, expose a public service, infer a revision history, or destructively manage user-owned data.
 
-SAMPO owns orchestration and control-plane state: Provider enrollment, catalogue knowledge, custody evidence, Projects, Protection Contracts, Plans, Jobs, observations, and audit history. It does not own user bytes merely because it observes or coordinates them. Byte custody remains an explicit property of each Appearance.
+SAMPO owns orchestration and control-plane state: Provider enrollment, Failure Domain evidence, catalogue knowledge, custody evidence, Projects, Protection Contracts, Plans, Jobs, observations, and audit history. It does not own user bytes merely because it observes or coordinates them. Byte custody remains an explicit property of each Appearance.
 
 ### One application, explicit modules
 
@@ -115,7 +115,7 @@ Paths, directories, `.sampo/` proximity, names, and provider enrollment never es
 
 ### Seshat
 
-- **Owns:** reconciled Providers, Content, Appearances, custody, Projects, Contracts, Plans, Jobs, Catalogue Facts, verification state, and audit history.
+- **Owns:** reconciled Providers, Failure Domains and their evidence, Content, Appearances, custody, Projects, Contracts, Plans, Jobs, Catalogue Facts, verification state, and audit history.
 - **May read:** durable input evidence and provider results presented through commands.
 - **May change:** authoritative catalogue state transactionally after validating invariants and preconditions.
 - **Never:** moves bytes, performs provider I/O, invents observations, or treats a planned/staged copy as verified.
@@ -127,7 +127,7 @@ Paths, directories, `.sampo/` proximity, names, and provider enrollment never es
 ### Tuoni
 
 - **Owns:** deterministic policy evaluation, capability matching, access routing, and explainable Plan construction.
-- **May read:** consistent Seshat snapshots and provider capability declarations.
+- **May read:** consistent Seshat snapshots, Provider capabilities, and Failure Domain relationships.
 - **May change:** proposed Plans only through commands; no provider or catalogue facts directly.
 - **Never:** performs storage I/O, approves its own material changes, establishes custody, or weakens Contract terms to make a Plan succeed.
 - **Input/output:** user intent, Contract maintenance need, current facts, capabilities; outputs Plan or explicit unsatisfiable explanation.
@@ -144,12 +144,12 @@ Paths, directories, `.sampo/` proximity, names, and provider enrollment never es
 - **Input/output:** approved Job; provider results, digests, committed locator, or structured failure.
 - **Failure:** preserves source, isolates partial output, records retryable/final/uncertain failure, and releases or lets its lease expire safely.
 - **Approval:** operates without repeated approval only within active Contract terms.
-- **Contract authority:** retry, resume, staging cleanup, verification, missing managed-copy recreation, and count restoration within approved terms.
+- **Contract authority:** retry, resume, staging cleanup, verification, positively confirmed missing/invalid managed-copy recreation, and restoration of count and Failure Domain constraints within approved terms. Unavailability alone grants no replacement authority.
 
 ### Caretaker
 
 - **Owns:** detection of Contract drift and safe maintenance needs.
-- **May read:** Contracts, Appearances, provider availability, verification age, and Job state.
+- **May read:** Contracts, Appearances, Failure Domain relationships, Provider availability, verification age, and Job state.
 - **May change:** maintenance suggestions or bounded Job requests through SAMPO.
 - **Never:** performs unapproved provider I/O, changes Contract scope, acts on user-owned data, or creates races with active Jobs.
 - **Input/output:** catalogue queries to already authorized Job request or user-facing suggestion.
@@ -161,7 +161,15 @@ Paths, directories, `.sampo/` proximity, names, and provider enrollment never es
 
 ### Provider
 
-A registered storage resource with stable internal identity, class, persistent identity evidence, enrollment/exclusion state, capabilities, availability, permissions, routing hints, and cost hints. Provider identity is never Content identity.
+A registered storage resource with stable internal identity, class, persistent identity evidence, enrollment/exclusion state, capabilities, availability, permissions, routing hints, cost hints, and evidence linking it to relevant Failure Domains. Provider identity is never Content or Failure Domain identity.
+
+### Failure Domain
+
+An explicitly represented loss boundary that may affect one or more Providers or storage instances together. Examples include a physical disk, enclosure, host, network dependency, service, account, or another approved durability boundary.
+
+Failure Domain relationships have evidence and confidence. They may overlap or contain one another. Different Providers are not presumed independent, and unknown independence is not sufficient for an unconstrained multi-copy Contract.
+
+For Contract evaluation, each qualifying managed Appearance must be a distinct committed storage instance and must contribute an independent approved Failure Domain. Aliases, hard links, mount aliases, or multiple Provider abstractions over the same underlying storage do not manufacture independence.
 
 ### Content
 
@@ -179,11 +187,11 @@ A Project is an overlapping logical collection. Membership relates a Project to 
 
 ### Protection Contract
 
-A persistent approved obligation over exact Content. It records required managed-copy count, approved provider/cost/locality constraints, current fulfillability state, amendment history, and cancellation disposition.
+A persistent approved obligation over exact Content. It records required minimum managed-copy count, required Failure Domain independence, any explicitly approved same-domain exception, approved Provider/cost/locality constraints, current protection assessment, amendment history, and cancellation disposition.
 
 ### Plan
 
-An immutable explainable proposal capturing source facts, intended destination, required space/cost, capability assumptions, expected safety result, and material differences from current authority. Approval either creates/changes a Contract or authorizes a one-off bounded action.
+An immutable explainable proposal capturing source facts, intended destination, required space/cost, capability assumptions, Failure Domain evidence, expected safety result, and material differences from current authority. A weaker same-domain alternative must be conspicuous and explicit. Approval either creates/changes a Contract or authorizes a one-off bounded action.
 
 ### Job
 
@@ -207,14 +215,14 @@ Capabilities describe guarantees and constraints, not just feature names. Each d
 | Stat | Metadata and stable file evidence | HEAD/metadata and generation evidence | Read bytes to verify where possible; otherwise unknown. |
 | Read | Open immutable snapshot or guarded stream | Get object/generation | Appearance cannot satisfy accessible-copy requirements. |
 | Stage/write | Temp file isolated from final name | Unique key or multipart upload | Provider cannot be destination. |
-| Atomic publish | Atomic rename/create-if-absent when proven | Conditional put/copy/promotion when semantics support it | Only immutable unique-locator commit; if partial output is visible, refuse destination use. |
+| Atomic publish | Atomic rename/create-if-absent when proven | Conditional create/publication when semantics support it | Provider is read-only for managed publication in the MVP; uniqueness guesses do not replace an atomic no-overwrite guarantee. |
 | Remove managed data | Delete proven managed file | Delete proven managed object/version | Retirement unavailable. Contract planning must account for it. |
 | Server-side copy | Native copy/reflink only when its equality and isolation semantics are proven | Provider-native copy with explicit source generation and result verification | Stream through a trusted reader/writer path if supported; otherwise no copy Plan. |
 | Native versioning | Filesystem snapshots or generations where exposed | Object versions/generations | SAMPO retains its own Content and Appearance semantics; native history is optional evidence. |
 | Preserve timestamps | Native timestamp preservation where permitted | User metadata or provider-native timestamps | Report fidelity loss; never fabricate preservation. |
 | Preserve names/hierarchy | Hierarchical names subject to platform rules | Key mapping without true directory semantics | Use an explicit reversible name mapping or report the Plan unsatisfiable. |
 | Content addressing | Provider may expose digest-based storage | Key may be derived from a digest | Treat as an optimization only; Provider locator and digest never replace Content identity or custody. |
-| Conditional mutation | File identity/generation precondition | Version/ETag precondition with documented semantics | Never replace; use create-new unique locator. |
+| Conditional mutation | File identity/generation precondition | Version/ETag precondition with documented semantics | Never replace; require proven create-new semantics or refuse managed mutation. |
 | Leases/locks | Native advisory or mandatory coordination | Provider lock/lease facility | Core Job leases still apply; provider writes must remain create-new and idempotent. |
 | Native identity | File ID and volume identity | Key plus version/generation | Rename inference weakens; identity remains uncertain. |
 | Integrity evidence | Size, reread digest | Own digest metadata or reread | SAMPO full digest remains required. ETag alone is insufficient. |
@@ -236,7 +244,9 @@ stateDiagram-v2
     Proposed --> ActiveUnfulfilled: Plan approved
     Proposed --> Rejected: User rejects
     ActiveUnfulfilled --> Fulfilled: Required verified managed count reached
-    Fulfilled --> ActiveUnfulfilled: Managed Appearance unavailable or lost
+    Fulfilled --> DegradedUnknown: Required Appearance unavailable
+    DegradedUnknown --> Fulfilled: Appearance returns and verifies
+    DegradedUnknown --> ActiveUnfulfilled: Appearance positively confirmed missing or invalid
     ActiveUnfulfilled --> Unfulfillable: Exact source or eligible destination unavailable
     Unfulfillable --> ActiveUnfulfilled: Exact Content or eligible destination returns
     ActiveUnfulfilled --> Fulfilled: Maintenance succeeds
@@ -249,7 +259,19 @@ stateDiagram-v2
     Cancelled --> [*]
 ```
 
-Contract state is derived from current reconciled facts and active Jobs; it does not cancel itself when reality is unfavorable. Planned, staging, uncertain, unavailable, user-owned, or digest-mismatched Appearances do not satisfy managed-copy count.
+Contract state is derived from current reconciled facts and active Jobs; it does not cancel itself when reality is unfavorable.
+
+An unconstrained required count of two means at least two distinct, verified, committed managed Appearances across two independent Failure Domains. Different Providers are insufficient evidence by themselves. If only same-domain placement is available, the Contract remains unfulfilled unless the user explicitly approves that weaker term.
+
+Protection reporting separates:
+
+- required minimum managed count;
+- verified available managed Appearances and independent Failure Domains;
+- known but unavailable and currently unverifiable managed Appearances;
+- positively confirmed missing or invalid Appearances;
+- surplus managed Appearances.
+
+Planned, staging, partial, user-owned, digest-mismatched, or duplicate references to one storage instance do not count. An unavailable Appearance does not count as currently verified available, but it is not treated as missing and does not trigger replacement. Surplus above the minimum is reported and retained until an explicit Contract amendment authorizes retirement.
 
 ## 7. Observation and reconciliation flow
 
@@ -278,6 +300,7 @@ Rules:
 
 - A negative listing never directly deletes an Appearance.
 - Provider unavailability is not Appearance deletion.
+- An unavailable managed Appearance remains known but currently unverifiable; reconciliation must not request replacement without positive missing/invalid evidence.
 - A changed digest detaches the Appearance from old Content and associates it with new Content only after complete verification.
 - A managed Appearance changed externally transfers to user custody before Contract evaluation.
 - Rename continuity uses provider-native identity first, then unambiguous complete-hash evidence, otherwise uncertainty.
@@ -297,7 +320,7 @@ sequenceDiagram
 
     U->>G: Keep a copy
     G->>T: Intent + current selection
-    T->>S: Query Content, Appearances, Providers, Contracts
+    T->>S: Query Content, Appearances, Providers, Failure Domains, Contracts
     T-->>G: Explainable Plan
     U->>G: Approve
     G->>S: Create/amend Contract and durable Job atomically
@@ -317,7 +340,7 @@ sequenceDiagram
 1. Persist Job before provider writes.
 2. Derive idempotency from operation, Content, destination Provider, Contract/Plan version, and intended managed role.
 3. Claim atomically with a renewable lease.
-4. Revalidate source digest/generation, destination capability revision, Contract authority, cancellation, cost, and space evidence.
+4. Revalidate source digest/generation, destination capability revision, Contract authority, Failure Domain evidence, cancellation, cost, and space evidence.
 5. Stage under a unique SAMPO-owned locator. Never truncate or replace an existing destination.
 6. Hash while transferring and verify staged bytes completely.
 7. If the final locator exists:
@@ -381,7 +404,7 @@ flowchart TD
     Wizard --> P1{"Allow cataloguing?"}
     P1 --> P2{"Allow .sampo/ ledger?"}
     P2 --> P3{"Allow managed-copy destination?"}
-    P3 --> Enroll["Persist separate permissions and capability evidence"]
+    P3 --> Enroll["Persist separate permissions, capabilities, and Failure Domain evidence"]
     Enroll --> Scan["Read/observe only within granted permissions"]
 ```
 
@@ -417,7 +440,7 @@ Sharing, export, or remote retrieval may deliberately select an otherwise lower-
 - Every state-changing request requires a valid local browser session and request-forgery defense selected by a later implementation ADR.
 - Origin/host validation, body-size limits, header/read/write/idle timeouts, and bounded concurrent work are required.
 - Browser content treats provider names, file names, metadata, and errors as untrusted display data.
-- Provider credentials live in protected application configuration or an integrated operating-system secret facility selected later; never in ordinary files or per-file visible metadata.
+- Provider credentials live in Windows Credential Manager under the accepted implementation ADR; never in ordinary files or per-file visible metadata.
 - Logs and audit views redact secrets and do not expose arbitrary local Content.
 - Provider operations execute with the operating-system user’s permissions and never claim to bypass native ACLs.
 - No accounts, roles, remote administration, public API, or multi-user authorization exist in the MVP.
@@ -435,6 +458,9 @@ Sharing, export, or remote retrieval may deliberately select an otherwise lower-
 | Destination exhaustion | Preserve source and existing destination; Job becomes retryable or requires replanning. |
 | Destination collision | Verify same-content candidate only when safe; otherwise stop without overwrite. |
 | Provider disconnect | Mark unavailable/unknown, retain Job and Contract, and resume after revalidation. |
+| Required managed Appearance unavailable | Report it as known but currently unverifiable. Do not create a replacement until positive missing/invalid evidence exists. |
+| Two Providers share one Failure Domain | Count only the independent domains allowed by the Contract. Leave an unconstrained Contract unfulfilled or present an explicit weaker Plan for approval. |
+| Surplus managed Appearances exist | Report them; do not automatically retire them or reinterpret the required minimum as an exact target. |
 | Eventual-consistency negative result | Remain unknown during provider settling rules; absence alone cannot authorize deletion. |
 | Provider-local ledger loss | Rescan; preserve byte access; uncertain custody becomes user-owned. |
 | Home catalogue loss | Rebuild only proven evidence; no destructive operation until custody and Contracts are re-established. |
@@ -469,7 +495,36 @@ It must not:
 - act as a distributed write-consensus log;
 - turn loss into permission to delete or overwrite.
 
-## 16. Implementation milestones
+## 16. Managed filesystem layout
+
+Each enrolled filesystem Provider reserves two distinct roots:
+
+- `library/` contains committed SAMPO-managed Appearances as ordinary readable files. A new managed copy starts with the first user-approved human-readable relative path and preserves the source extension. A later source rename changes catalogue evidence, not the committed managed path.
+- `.sampo/` contains machine metadata and SAMPO-owned staging. It is never required to decode committed Content and never establishes custody over neighbouring files.
+
+Sanitization and collision handling must be deterministic, readable, and Provider-aware. Publication may add a readable disambiguator but may never overwrite an existing destination. A file merely placed under `library/` remains user-owned.
+
+## 17. Adoption flow
+
+Observer reports an unproven file in managed space as a raw Observation. Seshat records user custody and Gateway offers a durable choice:
+
+- **Adopt:** revalidate and hash the Appearance, show any applicable Contract association, obtain explicit approval, then commit custody and audit evidence transactionally. If the bytes change before commit, adoption stops and requires a refreshed decision.
+- **Leave it mine:** retain user custody and suppress the same prompt for that observed generation unless it materially changes.
+- **Ask later:** retain user custody and preserve the prompt for later review.
+
+No path, scan, watcher event, or Provider-ledger claim can perform adoption by itself.
+
+## 18. Factual Provider usage
+
+Provider adapters may report measured byte counts, operation counts exposed by the Provider, transfer history, quota responses, last successful operations, and provider/billing failures. Seshat stores these as dated facts or observations with their source.
+
+SAMPO does not estimate currency bills, enforce Provider budgets, or create per-operation spending approval. Enabling a paid Provider makes it eligible within approved Contract terms; enrollment warns the user to configure Provider-side budgets, quotas, and billing alerts.
+
+## 19. Initial platform topology
+
+The first control plane is a Windows per-user local application with a loopback-only browser UI. It uses the current operating-system user's Provider permissions and does not require a privileged Windows service. Ubuntu Server participates first by hosting the S3-compatible Provider, not by running a second control plane. Linux control-plane support is later, but platform-specific behavior stays behind Provider and host-integration boundaries.
+
+## 20. Implementation milestones
 
 Implementation proceeds through the vertical milestones in `IMPLEMENTATION-MILESTONES.md`:
 
@@ -484,25 +539,27 @@ Implementation proceeds through the vertical milestones in `IMPLEMENTATION-MILES
 
 Each milestone must remain demonstrable without importing later Parking Lot behavior.
 
-## 17. Acceptance-test mapping
+## 21. Acceptance-test mapping
 
 | Architecture area | Acceptance tests |
 |---|---|
-| Ordinary-file and custody boundary | AT-01, AT-02, AT-07, AT-16, AT-17, AT-22 |
+| Ordinary-file and custody boundary | AT-01, AT-02, AT-07, AT-16, AT-17, AT-22, AT-26, AT-27 |
 | Exact Content and Appearances | AT-04, AT-05, AT-06, AT-09 |
 | Protection Contract lifecycle | AT-08, AT-09, AT-10, AT-11 |
+| Failure Domain independence and copy-count semantics | AT-23, AT-24, AT-25 |
 | Access routing | AT-03, AT-12, AT-13 |
 | Provider enrollment and portable memory | AT-14, AT-15, AT-16, AT-17 |
 | Durable filesystem transfer | AT-03, AT-19, AT-22 |
-| S3-compatible transfer | AT-12, AT-20, AT-22 |
+| S3-compatible transfer | AT-12, AT-20, AT-22, AT-28 |
 | Project snapshots | AT-18 |
 | Security boundary | AT-21 |
+| Factual usage boundary | AT-29 |
 
 All architecture areas are also subject to cross-cutting crash injection, duplicate execution, source mutation, destination collision, provider disconnection, name normalization, request limits, audit explanation, and raw-observation authority tests.
 
-## 18. Remaining implementation choices
+## 22. Accepted implementation decisions
 
-The following are not product decisions and require later ADRs before their milestone uses them:
+The product owner delegated these choices in `SAMPO-IMPLEMENTATION-ADR-OWNERSHIP.md`; `IMPLEMENTATION-ADRS.md` records the accepted decisions:
 
 - implementation language and browser framework;
 - durable catalogue and provider-ledger technology;
@@ -511,27 +568,27 @@ The following are not product decisions and require later ADRs before their mile
 - local S3-compatible development dependency;
 - staging naming and atomic-publish mechanics per provider;
 - local session and request-forgery controls;
-- operating-system support at each milestone;
+- Windows lifecycle, integration, packaging, and portability seams;
 - reconciliation cadence and resource budgets;
 - provider-local history retention;
 - optional directly witnessed fork-lineage storage.
 
-Each ADR must compare alternatives, safety, portability, build-versus-integrate considerations, and acceptance-test evidence. No low-level choice may weaken the approved product behavior.
+The selected direction is one Go process, server-rendered local web UI, SQLite catalogues/ledgers, SHA-256 exact-content identity with algorithm tagging, Windows host adapters, AWS SDK for Go v2, and a pinned SeaweedFS development target. No selection weakens the approved product behavior.
 
-## 19. Known technical ambiguities
+## 23. Resolved implementation questions
 
-The approved product behavior is sufficient to proceed through documentation review, but these details must be made explicit before the milestone that uses them:
+The accepted ADRs resolve the following questions; their acceptance evidence is implemented with the milestone that uses them:
 
 - **Consistent hashing of mutable files:** the method for detecting a source that changes during a read, especially when the Provider has no stable snapshot or generation token.
-- **Adoption workflow:** the precise verification, preview, and approval needed to transfer a pre-existing user-owned Appearance into managed custody.
-- **Managed filesystem layout:** how SAMPO chooses human-visible destination names and directories without creating collisions or implying custody by location.
+- **Adoption mechanics:** durable prompt suppression, verification races, Contract association, and audit representation while preserving the approved three-choice behavior.
+- **Managed filesystem mechanics:** Provider-specific sanitization, collision suffixes, length limits, normalization, and staging without changing the approved `library/` and `.sampo/` behavior.
 - **Provider identity confidence:** the evidence threshold for automatic reconnect versus cloned-provider warning and user review.
 - **Probable rename confidence:** the time window and uniqueness rules that make disappearance plus exact-hash appearance unambiguous enough to display as probable continuity.
-- **Protection diversity:** whether an unconstrained multi-copy Contract may place copies on the same Provider or physical failure domain, and how the Plan explains that limitation.
-- **Cost approval:** how expected and unexpected S3-compatible transfer/storage cost is represented, bounded, and treated as a material change.
+- **Failure Domain evidence model:** how overlapping disk, enclosure, host, service, and account dependencies are represented and what evidence is sufficient to establish independence conservatively.
+- **Factual usage collection:** which counters are reliably measurable and how their provenance and time ranges are represented without estimating bills or enforcing budgets.
 - **Access-routing weights:** the exact ordering among locality, latency, cost, availability confidence, and user preference.
 - **Provider-native retrieval:** how the local UI tells a user to retrieve S3-compatible bytes without SAMPO while preserving credentials and ordinary-tool usability.
 - **Managed retirement result:** how a Provider with delayed or ambiguous deletion reports completion, and whether SAMPO promises logical removal rather than secure erasure.
 - **Catalogue recovery scope:** which Project, Contract, and audit facts are intentionally recoverable from `.sampo/`, and which are explicitly home-catalogue-only.
 
-These are not permission to improvise. If an answer changes visible behavior, safety, cost, or future compatibility, it returns to the product owner; otherwise it is recorded as an implementation ADR with acceptance evidence.
+The ADR set also resolves access routing, Provider-native retrieval, managed retirement results, catalogue recovery scope, and minimal directly witnessed fork lineage. If a revision changes visible behavior, safety, cost, Contract meaning, recoverability, or future compatibility, it returns to the product owner.

@@ -6,17 +6,21 @@ No production implementation begins until the architecture documentation is appr
 
 ## Milestone 0: Documentation truth
 
+**Status:** Complete — 2026-08-02
+
 Deliver:
 
 - Approved decision record.
 - Truthful README and corrected Spec.
 - MVP architecture, acceptance tests, and parking lot.
 - Manifesto SAMPO origin section.
-- No selected language, framework, or database schema.
+- Accepted implementation ADR set, without a database schema or implementation code.
 
 Demonstration: a competent implementation team can describe authority, custody, identity, Contract, Plan, Job, observation, and failure behavior without guessing.
 
 ## Milestone 1: Read-only filesystem catalogue
+
+**Status:** Complete — 2026-08-02
 
 Deliver one local process with:
 
@@ -26,10 +30,11 @@ Deliver one local process with:
 - Search by name.
 - Exact duplicate grouping as multiple Appearances of one Content item.
 - Custody defaulting to user-owned.
+- Windows per-user application lifecycle and loopback-only Gateway shell.
 
 No copying, deletion, managed custody, S3 integration, or automatic repair.
 
-Demonstrates AT-01, AT-02, AT-04, AT-05, and the loopback portion of AT-21.
+Demonstrates AT-01, AT-02, AT-04, AT-05, the loopback portion of AT-21, and the Windows-host portion of AT-28.
 
 ## Milestone 2: Enrollment and portable provider memory
 
@@ -38,11 +43,12 @@ Deliver:
 - Yes / No / Ask next time prompt.
 - Separate catalogue, `.sampo/`, and managed-destination permissions.
 - Stable provider identity evidence.
+- Explicit Failure Domain evidence independent of Provider identity.
 - Provider-local ledger and home Seshat catalogue.
 - Reconnect comparison and explicit uncertainty.
 - Provider-ledger and home-catalogue recovery behavior.
 
-Demonstrates AT-14 through AT-17.
+Demonstrates AT-14 through AT-17 and the enrollment/evidence portion of AT-23.
 
 ## Milestone 3: One verified managed filesystem copy
 
@@ -51,13 +57,15 @@ Deliver:
 - **Keep a copy** action.
 - Explainable destination/space Plan and approval.
 - Persistent Protection Contract.
+- Independent Failure Domain planning and conspicuous same-domain alternative approval.
 - Durable idempotent Job with claim and recovery state.
 - Isolated filesystem staging, complete digest verification, safe commit, and managed custody.
+- Readable committed layout under `library/`, SAMPO-owned staging under `.sampo/`, deterministic collision handling, and stable first-approved paths.
 - Read/Open routing among available Appearances.
 
 No replacement of user-owned destinations and no generic deletion.
 
-Demonstrates AT-03, AT-12’s routing principle, AT-19, and filesystem AT-22.
+Demonstrates AT-03, AT-12’s routing principle, AT-19, filesystem AT-22, AT-24, AT-26, and the filesystem side of AT-23.
 
 ## Milestone 4: Continuous Contract maintenance
 
@@ -65,12 +73,14 @@ Deliver:
 
 - Fulfilled, unfulfilled-but-fulfillable, and unfulfillable states.
 - Replacement of missing managed copies within existing authority.
+- Unavailable-versus-positively-missing behavior and surplus reporting without automatic retirement.
 - External edit transfer from managed to user custody.
 - Return of previously unavailable exact Content.
 - Contract amendment and bounded managed-copy retirement.
 - User-owned working-copy creation for Edit.
+- Durable Adopt / Leave it mine / Ask later handling for unproven files in managed space.
 
-Demonstrates AT-07 through AT-11 and AT-13.
+Demonstrates AT-07 through AT-11, AT-13, AT-25, and AT-27.
 
 ## Milestone 5: Local S3-compatible provider
 
@@ -81,8 +91,10 @@ Deliver:
 - Isolated/multipart staging, complete SAMPO digest verification, idempotent recovery, and provider-native retrieval guidance.
 - Access routing between local filesystem and object storage.
 - Failure injection for latency, service loss, ambiguous completion, and eventual-consistency behavior where applicable.
+- Proof that a filesystem Provider and local S3-compatible Provider sharing backing storage remain one Failure Domain.
+- Factual byte, operation, transfer-history, quota, and Provider-failure reporting without bill estimates or budget enforcement.
 
-Demonstrates AT-12, AT-20, and S3-compatible AT-22.
+Demonstrates AT-12, AT-20, AT-23, AT-28, AT-29, and S3-compatible AT-22.
 
 ## Milestone 6: Projects by reviewed snapshot
 
@@ -107,7 +119,7 @@ Deliver:
 - Resource, request, session, and timeout limits.
 - Security review and all acceptance tests green.
 
-MVP completion requires all 22 acceptance tests and cross-cutting fault tests to pass.
+MVP completion requires all 29 acceptance tests and cross-cutting fault tests to pass.
 
 ## Milestone discipline
 
