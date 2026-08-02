@@ -7,7 +7,7 @@
 - Every forgotten USB stick.
 - Every piece of your digital life.
 
-MAS-H does not judge existing storage.
+SAMPO does not judge existing storage.
 
 It accepts the user's digital life as it exists today, not as it should have been organised ten years ago.
 
@@ -21,9 +21,9 @@ Storage is an implementation detail.
 
 ## First Law
 
-**MAS-H must never make user data less accessible than it was before MAS-H existed.**
+**SAMPO must never make user data less accessible than it was before SAMPO existed.**
 
-If MAS-H disappears, the user's data remains intact on ordinary filesystems using ordinary tools.
+If SAMPO disappears, the user's data remains intact on ordinary filesystems using ordinary tools.
 
 ---
 
@@ -51,9 +51,9 @@ Examples:
 
 **Existing tools should be orchestrated before new ones are invented.**
 
-MAS-H prefers to build upon proven open-source software rather than replace it.
+SAMPO prefers to build upon proven open-source software rather than replace it.
 
-If an excellent tool already exists, MAS-H should integrate it.
+If an excellent tool already exists, SAMPO should integrate it.
 
 ---
 
@@ -67,7 +67,7 @@ CPU cycles are cheap.
 
 Human attention is expensive.
 
-MAS-H exists to reduce cognitive load, not benchmark scores.
+SAMPO exists to reduce cognitive load, not benchmark scores.
 
 ---
 
@@ -93,7 +93,25 @@ The user should never have to care which one currently holds an object.
 
 ---
 
-MAS-H is a **Storage Hypervisor with a Digital Librarian control plane**.
+## SAMPO
+
+SAMPO came first.
+
+The name existed before the architecture and before anyone knew what the letters were supposed to mean.
+
+Later, it was retroactively expanded into:
+
+**Storage Abstraction Management & Policy Orchestrator**
+
+> **What exactly is SAMPO?**
+>
+> “Your guess is as good as mine. I was high. I liked the name.”
+>
+> — Arttu Pitou, Founder
+
+---
+
+SAMPO is a **Storage Hypervisor with a Digital Librarian control plane**.
 
 The hypervisor provides the infrastructure.
 

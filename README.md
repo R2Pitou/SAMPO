@@ -1,239 +1,117 @@
-# MAS-H
+# SAMPO
 
-## Memory Abstraction Storage Hypervisor
+**Storage Abstraction Management & Policy Orchestrator**
 
-### Storage Hypervisor with a Digital Librarian control plane
+SAMPO is a storage orchestration product with a Digital Librarian control plane. It builds a searchable logical library over ordinary data, recognizes exact content across storage providers, and maintains protection obligations approved by the user.
 
-MAS-H abstracts heterogeneous storage providers and presents a unified library of objects, projects, and relationships to users. It preserves existing files, reduces human cognitive load, and orchestrates existing tools (Everything, Syncthing, Git, etc.) rather than replacing them.
+SAMPO does not require users to reorganize their existing digital life. It treats provider placement as an implementation detail while preserving ordinary provider-native access.
 
-The goal is not to invent yet another filesystem or NAS. The goal is to make physical storage irrelevant to the user.
+> SAMPO came first. The expansion came later. See the [Manifesto](MANIFESTO.md) for the historically accurate explanation.
 
----
+## Constitutional laws
 
-## SAMPO
+The [Manifesto](MANIFESTO.md) governs the project:
 
-**SAMPO** stands for **Storage Abstraction Management and Policy Orchestrator**.
+1. SAMPO must never make user data less accessible than it was before SAMPO.
+2. The user expresses intent; the Librarian determines implementation.
+3. Existing tools should be orchestrated before replacements are invented.
+4. Human attention is more valuable than machine time.
+5. Storage providers are implementation details, not identities.
 
-SAMPO is the reference storage engine for MAS-H. It turns user intent into storage operations while hiding the complexity of heterogeneous storage providers.
+Removing SAMPO must leave committed files readable through ordinary provider-native tools. Neither the home catalogue nor provider-local metadata may be required to decode user bytes.
 
-SAMPO itself does **not** store data. Instead, it coordinates a collection of specialised services called **Staff**, each with a single responsibility.
+## Current status
 
-SAMPO also provides the event infrastructure that lets the Staff communicate cleanly. The Staff do not directly manage each other. They publish and consume events through SAMPO.
+SAMPO is in an architecture-first MVP phase following a deliberate implementation reset. There is currently no production implementation, build command, runtime configuration, public API, or selected programming language.
 
----
+The architecture is being documented before implementation so custody, identity, Contracts, provider behavior, failure recovery, and destructive authority are explicit and testable.
 
-## SAMPO Staff Components
+## Approved MVP
 
-- **Tuoni** – the reasoning engine that interprets user intent, consults the catalogue, evaluates policies, and produces storage decisions. Tuoni never performs storage I/O directly.
-- **Seshat** – the catalogue that holds system knowledge: objects, relationships, versions, copies, health, provenance, policies, intent, and history.
-- **Boatman** – executes transfer plans created by Tuoni, including replication, migration, archiving, cache promotion, and cache eviction.
-- **Observer** – monitors the outside world: filesystem changes, storage-provider availability, USB events, Git repos, cloud providers, and similar external changes. It publishes raw events.
-- **Caretaker** – performs background maintenance when resources are idle: hash verification, deduplication, replica repair, health checks, thumbnail generation, semantic indexing, archive and cache maintenance.
-- **Gateway** – provides familiar interfaces such as SMB, WebDAV, and HTTP/REST for users and applications. It translates user requests into SAMPO operations.
+The first release is one single-user, single-node local application with a loopback-only browser interface.
 
----
+It proves one complete journey:
 
-## High-Level Architecture
+1. The user connects and explicitly enrolls a storage provider.
+2. SAMPO discovers and hashes existing files without changing them.
+3. The user searches by name and sees one exact Content item with its known Appearances.
+4. The user requests **Keep a copy** and reviews an explainable Plan.
+5. Approval creates a persistent Protection Contract and durable Job.
+6. Boatman stages, commits, and independently verifies an additional ordinary copy.
+7. Only verified committed bytes become SAMPO-managed and satisfy the Contract.
+8. If the original provider becomes unavailable, Open routes to the best verified available Appearance.
 
-```mermaid
-flowchart TB
+The MVP proves genuine provider abstraction with:
 
-    User["👤 User"]
+- a mounted hierarchical filesystem provider; and
+- an S3-compatible object-storage provider used as object storage rather than a fake drive.
 
-    Gateway["Gateway
+No specific S3-compatible implementation or other technology has been selected yet.
 
-SMB • WebDAV • REST"]
+## Core concepts
 
-    SAMPO["SAMPO
+- **Content:** one exact byte sequence recognized by complete digest evidence.
+- **Appearance:** one occurrence of Content at a provider-native opaque locator.
+- **Custody:** user-owned or SAMPO-managed authority over an Appearance, established by provenance or explicit adoption—never by path.
+- **Protection Contract:** a persistent approved obligation over exact Content.
+- **Plan:** an explainable proposal without execution authority until approved.
+- **Job:** a durable, retryable, idempotent unit of already authorized work.
+- **Observation:** untrusted evidence from a provider or watcher.
+- **Catalogue Fact:** a reconciled statement Seshat currently accepts.
 
-Storage Abstraction Management
-& Policy Orchestrator"]
+The MVP has no canonical copy. Read and edit access are routed per operation among eligible verified Appearances.
 
-    Tuoni["Tuoni
+## Staff responsibilities
 
-Reasoning Engine
+SAMPO is the product, local application, and orchestration/control-plane boundary. Its Staff names are logical responsibilities, not implied processes or services:
 
-User Intent
-Policies
-System State
-Planning"]
+- **Gateway** serves the local browser and translates user actions into bounded requests.
+- **Observer** reports untrusted external observations and never acts on them directly.
+- **Seshat** owns reconciled catalogue knowledge and Contract state.
+- **Tuoni** creates explainable Plans without storage I/O.
+- **Boatman** executes approved Jobs without inventing policy.
+- **Caretaker** detects Contract maintenance needs and triggers only already authorized work or suggestions requiring approval.
 
-    Seshat["Seshat
+Direct in-process queries and commands are allowed. Durable domain events record committed facts; SAMPO does not depend on a fire-and-forget event bus for correctness.
 
-Knowledge Catalogue
+## Safety boundary
 
-Objects
-Relationships
-Versions
-Copies
-Health
-Provenance
-Policies
-Intent
-History"]
+Pre-existing and externally created files are user-owned. SAMPO may read, hash, catalogue, observe, search, and copy from them, but may not overwrite, truncate, rename, move, delete, replace, or silently adopt them.
 
-    Boatman["Boatman
+An Appearance becomes SAMPO-managed only when SAMPO created it through an approved recorded Job or the user explicitly adopted it. Managed-copy retirement is allowed only through explicit Contract amendment and only when no active Contract still requires that Appearance.
 
-Moves Objects
+Provider-local metadata uses an explicitly permitted `.sampo/` control area. Loss of `.sampo/` or the home catalogue must leave ordinary data readable; uncertain custody reverts to user-owned safety.
 
-Replicate
-Migrate
-Archive
-Cache"]
+## Explicit MVP exclusions
 
-    Observer["Observer
+The MVP does not include:
 
-Publishes Events
+- synchronization or automatic edit propagation;
+- automatic migration, tiering, eviction, or destructive deduplication;
+- deletion of user-owned data;
+- Git-like revision history or merge behavior;
+- SMB, WebDAV, virtual drives, or filesystem overlays;
+- multi-node or multi-user operation;
+- public or LAN administration;
+- semantic or AI-required search;
+- arbitrary cloud providers beyond the local S3-compatible proof.
 
-Filesystem
-USB
-Git
-Cloud
-Providers"]
+See the [Parking Lot](PARKING-LOT.md) for the complete deferred list.
 
-    Caretaker["Caretaker
+## Architecture documents
 
-Maintenance
+Read in this order:
 
-Hash Verification
-Deduplication
-Replica Repair
-Semantic Indexing
-Archive & Cache"]
-
-    Storage["Storage Providers
+1. [Manifesto](MANIFESTO.md)
+2. [Product specification](Spec.md)
+3. [MVP architecture decisions](MVP-ARCHITECTURE-DECISIONS.md)
+4. [MVP architecture](MVP-ARCHITECTURE.md)
+5. [MVP acceptance tests](MVP-ACCEPTANCE-TESTS.md)
+6. [Implementation milestones](IMPLEMENTATION-MILESTONES.md)
+7. [Parking Lot](PARKING-LOT.md)
 
-SSD
-HDD
-USB
-GitHub
-Cloud
-Other MAS-H Nodes"]
-
-    User --> Gateway
-    Gateway --> SAMPO
-
-    Observer --> SAMPO
-    Observer --> Storage
-
-    SAMPO --> Tuoni
-    SAMPO --> Seshat
-    SAMPO --> Boatman
-    SAMPO --> Caretaker
-
-    Tuoni --> Seshat
-    Tuoni --> Boatman
-    Tuoni --> Caretaker
-
-    Boatman --> Storage
-    Caretaker --> Storage
-```
-
----
-
-## Design Principles
-
-- Storage is an implementation detail.
-- Search comes before folders.
-- Users express intent, not implementation.
-- MAS-H never makes data less accessible.
-- Existing open-source tools are orchestrated, not replaced.
-- Optimise human time before machine time.
-- The system should feel like a librarian, not a storage admin panel.
-- The user should never need to remember which drive contains a file.
-- The system should preserve ordinary files and ordinary filesystems.
-- The architecture should remain understandable even if individual components move to different machines.
-
----
-
-## Documentation
-
-- [VISION.md](VISION.md)
-- [MANIFESTO.md](MANIFESTO.md)
-- [SAMPO.md](SAMPO.md)
-- [NON_GOALS.md](NON_GOALS.md)
-
----
-
-## Getting Started
-
-### How to Compile and Run Locally
-
-Follow these instructions to compile, run, and query the MAS-H system on your local machine:
-
-#### Prerequisites
-- **Go**: Ensure Go is installed (Go 1.16 or newer recommended). You can verify with `go version`.
-
-#### Compilation
-To compile the MAS-H control plane binary manually, run the following command from the repository root:
-```bash
-go build -o mash cmd/mash/main.go
-```
-This produces a compiled executable called `mash` in the root directory.
-
-#### Running the System
-We provide a convenient shell script that sets up necessary workspace folders, compiles the application, and starts the control plane with the default configuration:
-```bash
-./scripts/run.sh
-```
-
-Alternatively, you can start the compiled binary manually by passing the custom configuration file path:
-```bash
-./mash -config config.json
-```
-
-#### Running the Test Suite
-To run all tests (including the new integration and API gateway tests), use:
-```bash
-go test -v ./...
-```
-
-#### Querying the REST API
-Once the control plane is online, the Gateway HTTP server runs on the port specified in `config.json` (default: `8080`). You can interact with the system via standard REST endpoints using `curl` or any other HTTP client:
-
-##### 1. List Registered Storage Providers
-```bash
-curl -i http://localhost:8080/providers
-```
-
-##### 2. List All Tracked Objects (Metadata Catalogue)
-```bash
-curl -i http://localhost:8080/objects
-```
-
-##### 3. Register a New Custom Object Metadata Record
-```bash
-curl -i -X POST http://localhost:8080/objects \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "my-document.txt",
-    "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "projectId": "personal-docs",
-    "metadata": {
-      "note": "Registered manually via Gateway API"
-    }
-  }'
-```
-
----
-
-## Documentation
-
-Read the individual documents to understand the vision, architecture, terminology, and design decisions before any code is written.
-
-The best order is:
-
-1. `VISION.md`
-2. `MANIFESTO.md`
-3. `OBJECT_MODEL.md`
-4. `SAMPO.md`
-5. `ARCHITECTURE.md`
-6. `POLICIES.md`
-7. `GLOSSARY.md`
-8. `NON_GOALS.md`
-9. `EVENTS.md`
-10. `DECISIONS.md`
-11. `PRIOR_ART.md`
-12. `BUILDING_BLOCKS.md`
-
-If something is unclear, add a note to `DECISIONS.md` rather than guessing.
+The historical [architecture decision handoff](mash-mvp-architecture-decision-record-and-codex-handoff.md) records the meeting that established these decisions. It predates the final product-naming correction and therefore contains the retired working title **MAS-H**.
+
+## Implementation status
+
+Implementation has not begun. Technology and dependency choices will be recorded separately only when a milestone requires them, with alternatives, safety consequences, portability consequences, build-versus-integrate reasoning, and acceptance-test evidence.
