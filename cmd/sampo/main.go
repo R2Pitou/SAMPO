@@ -12,13 +12,16 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"syscall"
 	"time"
 
 	"sampo/internal/app"
 	"sampo/internal/catalog"
+	"sampo/internal/diagnostics"
 	"sampo/internal/gateway"
 	"sampo/internal/host"
+	"sampo/internal/seshat"
 )
 
 func main() {
@@ -51,6 +54,19 @@ func run() error {
 		return err
 	}
 	defer closeLog()
+	diagnostic := diagnostics.NewManager(filepath.Join(*dataDir, "debug-sessions"), diagnostics.BuildEnvironment(map[string]any{
+		"data_dir":          *dataDir,
+		"no_browser":        *noBrowser,
+		"gateway_bind":      "127.0.0.1:dynamic",
+		"catalogue_backend": "sqlite",
+	}))
+	defer diagnostic.Interrupt("SAMPO stopped before the Debug Mode session was explicitly ended")
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			diagnostic.CapturePanic(context.Background(), "host", "application.run", recovered, debug.Stack())
+			panic(recovered)
+		}
+	}()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -61,8 +77,9 @@ func run() error {
 	}
 	defer store.Close()
 
-	service := app.New(store)
-	localGateway, err := gateway.New(service, ctx, logger)
+	catalogue := seshat.WithDiagnostics(store, diagnostic)
+	service := app.New(catalogue, diagnostic)
+	localGateway, err := gateway.New(service, ctx, logger, diagnostic)
 	if err != nil {
 		return err
 	}

@@ -51,6 +51,21 @@ Deliver:
 
 This milestone prevents one physical filesystem occurrence from masquerading as multiple Providers. It does not implement Provider-local `.sampo` identity, automatic reconnect, clone adjudication, Failure Domain evidence, managed custody, or destructive authority; those remain in later milestones.
 
+## Milestone 1.2: Bounded Debug Mode
+
+**Status:** Complete - 2026-08-05
+
+Deliver:
+
+- Explicit Start and Stop workflow in the local browser dashboard with a visible active state.
+- Incremental, crash-useful local diagnostic bundles outside the Seshat catalogue.
+- Correlation of one user action through Gateway, application logic, Seshat, and Observer.
+- Semantic Seshat acceptance and refusal evidence without SQL narration or persistence leakage.
+- Automatic secret redaction, sanitized configuration, summaries, durations, errors, and captured panic evidence.
+- No remote collector, file-content logging, per-file scan narration, or meaningful disabled-mode overhead.
+
+This mode exists only to reconstruct a bounded manual troubleshooting session. Diagnostic recording has no authority over catalogue state and failures in the recorder do not change application behavior.
+
 ## Milestone 2: Enrollment and portable provider memory
 
 Deliver:

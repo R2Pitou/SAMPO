@@ -147,6 +147,18 @@ SAMPO binds to an operating-system-assigned `127.0.0.1` port, opens a one-time b
 go run ./cmd/sampo -data-dir .sampo-data -no-browser
 ```
 
+### Debug Mode for a manual test session
+
+Debug Mode is an explicit, local, bounded diagnostic session for reproducing a problem. It is not telemetry: SAMPO sends nothing remotely, does not record file contents, and keeps diagnostic evidence separate from the authoritative catalogue.
+
+1. Start SAMPO and open its browser dashboard.
+2. Select **Start Debug Session** before reproducing the problem. The dashboard visibly shows **Debug Mode active**.
+3. Perform the actions that produced the unexpected result.
+4. Select **Stop Debug Session**.
+5. Give the displayed diagnostic-bundle folder to the person investigating the problem.
+
+With the default data directory on Windows, bundles are stored beneath `%LOCALAPPDATA%\sampo\debug-sessions\<session-id>\`. With `-data-dir`, they are stored beneath `<data-dir>\debug-sessions\<session-id>\`. Each bundle contains an incrementally written JSON Lines event log, a concise summary, sanitized environment and configuration evidence, and panic evidence when SAMPO captured one. If SAMPO is forcibly terminated, the already-flushed files remain available and the summary identifies the session as incomplete.
+
 Verify the implementation:
 
 ```powershell
@@ -155,4 +167,4 @@ go vet ./...
 go build ./cmd/sampo
 ```
 
-The test suite covers provider non-mutation, complete hashing, exact duplicate grouping, rename continuity, changed-byte history, provider-root alias and overlap rejection, scan-time root replacement detection, SQLite durability settings and corruption rejection, session bootstrap, Host and Origin enforcement, CSRF protection, and the Milestone 1 journey.
+The test suite covers provider non-mutation, complete hashing, exact duplicate grouping, rename continuity, changed-byte history, provider-root alias and overlap rejection, scan-time root replacement detection, SQLite durability settings and corruption rejection, session bootstrap, Host and Origin enforcement, CSRF protection, Debug Mode redaction and correlation, and the Milestone 1 journey.

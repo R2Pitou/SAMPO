@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"sampo/internal/diagnostics"
 	"sampo/internal/domain"
 )
 
@@ -32,7 +33,7 @@ func (fakeApplication) Stats(context.Context) (domain.CatalogueStats, error) {
 
 func TestGatewayRequiresOneTimeSessionOriginAndCSRF(t *testing.T) {
 	const baseURL = "http://127.0.0.1:43123"
-	gateway, err := New(fakeApplication{}, context.Background(), log.New(io.Discard, "", 0))
+	gateway, err := New(fakeApplication{}, context.Background(), log.New(io.Discard, "", 0), diagnostics.NewManager(t.TempDir(), diagnostics.BuildEnvironment(nil)))
 	if err != nil {
 		t.Fatal(err)
 	}

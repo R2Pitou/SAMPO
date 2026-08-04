@@ -15,11 +15,31 @@
       <p class="eyebrow">Storage Abstraction Management &amp; Policy Orchestrator</p>
       <h1>SAMPO</h1>
     </div>
-    <p class="status">Local catalogue · read-only milestone</p>
+    <div class="header-status">
+      <p class="status">Local catalogue · read-only milestone</p>
+      {{if .Debug.Active}}<p class="debug-indicator" role="status">Debug Mode active</p>{{end}}
+    </div>
   </header>
 
   <main>
     {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+    <section class="panel debug-panel" id="debug-mode" data-debug-active="{{.Debug.Active}}">
+      <div>
+        <h2>Debug Mode</h2>
+        <p>Temporarily records local actions and outcomes for one troubleshooting session. It never records file contents and sends nothing remotely.</p>
+        {{if .Debug.Active}}
+          <p class="debug-session"><strong>Recording session</strong> <code>{{.Debug.SessionID}}</code></p>
+        {{else if .Debug.BundlePath}}
+          <p class="debug-bundle"><strong>Last diagnostic bundle</strong> <code>{{.Debug.BundlePath}}</code></p>
+        {{end}}
+        {{if .Debug.RecorderWarning}}<p class="error" role="alert">Recorder warning: {{.Debug.RecorderWarning}}</p>{{end}}
+      </div>
+      {{if .Debug.Active}}
+        <button type="button" id="stop-debug">Stop Debug Session</button>
+      {{else}}
+        <button type="button" id="start-debug">Start Debug Session</button>
+      {{end}}
+    </section>
     <section class="stats" aria-label="Catalogue summary">
       <article><strong>{{.Stats.Contents}}</strong><span>exact contents</span></article>
       <article><strong>{{.Stats.AvailableFiles}}</strong><span>available files</span></article>

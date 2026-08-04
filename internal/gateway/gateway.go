@@ -15,10 +15,12 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 
+	"sampo/internal/diagnostics"
 	"sampo/internal/domain"
 )
 
@@ -39,6 +41,7 @@ type Gateway struct {
 	app             Application
 	background      context.Context
 	logger          *log.Logger
+	diagnostics     diagnostics.Controller
 	templates       *template.Template
 	bootstrapSecret string
 
@@ -55,9 +58,12 @@ type session struct {
 
 type sessionContextKey struct{}
 
-func New(app Application, background context.Context, logger *log.Logger) (*Gateway, error) {
+func New(app Application, background context.Context, logger *log.Logger, diagnostic diagnostics.Controller) (*Gateway, error) {
 	if logger == nil {
 		logger = log.Default()
+	}
+	if diagnostic == nil {
+		return nil, errors.New("Debug Mode controller is required")
 	}
 	templates, err := template.New("root").Funcs(template.FuncMap{
 		"shortDigest": func(value string) string {
@@ -82,7 +88,7 @@ func New(app Application, background context.Context, logger *log.Logger) (*Gate
 		return nil, err
 	}
 	return &Gateway{
-		app: app, background: background, logger: logger, templates: templates,
+		app: app, background: background, logger: logger, diagnostics: diagnostic, templates: templates,
 		bootstrapSecret: secret, sessions: make(map[string]session),
 	}, nil
 }
@@ -125,30 +131,39 @@ func (g *Gateway) Handler(baseURL string) (http.Handler, error) {
 	mux.HandleFunc("POST /api/providers", g.enrollProvider)
 	mux.HandleFunc("POST /api/providers/{id}/scan", g.scanProvider)
 	mux.HandleFunc("GET /api/search", g.search)
+	mux.HandleFunc("GET /api/debug", g.debugStatus)
+	mux.HandleFunc("POST /api/debug/start", g.startDebug)
+	mux.HandleFunc("POST /api/debug/stop", g.stopDebug)
 
 	expectedOrigin := parsed.Scheme + "://" + parsed.Host
-	return g.securityMiddleware(mux, parsed.Host, expectedOrigin), nil
+	return g.recoverPanics(g.securityMiddleware(mux, parsed.Host, expectedOrigin)), nil
 }
 
 func (g *Gateway) securityMiddleware(next http.Handler, expectedHost, expectedOrigin string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if g.diagnostics.Enabled() {
+			r = r.WithContext(diagnostics.EnsureCorrelation(r.Context()))
+		}
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Cache-Control", "no-store")
 		if r.Host != expectedHost {
+			g.validationFailure(r.Context(), "unexpected_host", r.URL.Path)
 			g.logger.Printf("security reject reason=unexpected-host remote=%q host=%q", r.RemoteAddr, r.Host)
 			http.Error(w, "invalid host", http.StatusBadRequest)
 			return
 		}
 		if forwarded := r.Header.Get("Forwarded"); forwarded != "" || r.Header.Get("X-Forwarded-Host") != "" {
+			g.validationFailure(r.Context(), "proxy_headers", r.URL.Path)
 			g.logger.Printf("security reject reason=proxy-headers remote=%q", r.RemoteAddr)
 			http.Error(w, "proxy headers are not accepted", http.StatusBadRequest)
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			if r.Header.Get("Origin") != expectedOrigin {
+				g.validationFailure(r.Context(), "invalid_origin", r.URL.Path)
 				g.logger.Printf("security reject reason=origin path=%q remote=%q", r.URL.Path, r.RemoteAddr)
 				http.Error(w, "invalid origin", http.StatusForbidden)
 				return
@@ -160,11 +175,13 @@ func (g *Gateway) securityMiddleware(next http.Handler, expectedHost, expectedOr
 		}
 		sess, ok := g.authenticate(r)
 		if !ok {
+			g.validationFailure(r.Context(), "session_required", r.URL.Path)
 			http.Error(w, "session required", http.StatusUnauthorized)
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			if r.Header.Get("X-CSRF-Token") != sess.csrf {
+				g.validationFailure(r.Context(), "invalid_csrf", r.URL.Path)
 				g.logger.Printf("security reject reason=csrf path=%q remote=%q", r.URL.Path, r.RemoteAddr)
 				http.Error(w, "invalid request token", http.StatusForbidden)
 				return
@@ -250,6 +267,7 @@ type indexData struct {
 	Providers []domain.Provider
 	Results   []domain.SearchResult
 	Error     string
+	Debug     diagnostics.SessionInfo
 }
 
 func (g *Gateway) index(w http.ResponseWriter, r *http.Request) {
@@ -259,7 +277,8 @@ func (g *Gateway) index(w http.ResponseWriter, r *http.Request) {
 	}
 	sess := r.Context().Value(sessionContextKey{}).(session)
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
-	data := indexData{CSRF: sess.csrf, Query: query}
+	g.record(r.Context(), diagnostics.Event{Component: "gateway", Operation: "dashboard.view", Phase: "ui_action", Outcome: "requested", Attributes: map[string]any{"search_requested": query != ""}})
+	data := indexData{CSRF: sess.csrf, Query: query, Debug: g.diagnostics.Status()}
 	var err error
 	data.Stats, err = g.app.Stats(r.Context())
 	if err == nil {
@@ -289,7 +308,9 @@ func (g *Gateway) providers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (g *Gateway) enrollProvider(w http.ResponseWriter, r *http.Request) {
+	ctx := diagnostics.EnsureCorrelation(r.Context())
 	if !isJSON(r.Header.Get("Content-Type")) {
+		g.validationFailure(ctx, "json_required", r.URL.Path)
 		http.Error(w, "JSON body required", http.StatusUnsupportedMediaType)
 		return
 	}
@@ -299,15 +320,20 @@ func (g *Gateway) enrollProvider(w http.ResponseWriter, r *http.Request) {
 		Root        string `json:"root"`
 	}
 	if err := decodeJSON(r.Body, &request); err != nil {
+		g.validationFailure(ctx, "invalid_provider_request", r.URL.Path)
 		http.Error(w, "invalid provider request", http.StatusBadRequest)
 		return
 	}
-	provider, err := g.app.EnrollFilesystem(r.Context(), request.DisplayName, request.Root)
+	g.record(ctx, diagnostics.Event{Component: "gateway", Operation: "provider.enroll", Phase: "ui_action", Outcome: "submitted", Attributes: map[string]any{"display_name": request.DisplayName, "submitted_locator": request.Root}})
+	started := time.Now()
+	provider, err := g.app.EnrollFilesystem(ctx, request.DisplayName, request.Root)
 	if err != nil {
+		g.record(ctx, diagnostics.Event{Severity: diagnostics.SeverityWarn, Component: "gateway", Operation: "provider.enroll", Phase: "response", Outcome: "refused", Message: err.Error(), Duration: time.Since(started)})
 		g.logger.Printf("provider enroll result=rejected reason=%q", err)
 		writeAPIError(w, err, http.StatusBadRequest)
 		return
 	}
+	g.record(ctx, diagnostics.Event{Component: "gateway", Operation: "provider.enroll", Phase: "response", Outcome: "accepted", Duration: time.Since(started), Attributes: map[string]any{"provider_id": provider.ID}})
 	g.logger.Printf("provider enroll result=accepted provider=%q root=%q next=scan", provider.ID, provider.RootLocator)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -317,22 +343,79 @@ func (g *Gateway) enrollProvider(w http.ResponseWriter, r *http.Request) {
 func (g *Gateway) scanProvider(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" || id == "scan" {
+		g.validationFailure(r.Context(), "provider_id_required", r.URL.Path)
 		http.Error(w, "provider id required", http.StatusBadRequest)
 		return
 	}
+	ctx := diagnostics.EnsureCorrelation(r.Context())
+	g.record(ctx, diagnostics.Event{Component: "gateway", Operation: "provider.scan", Phase: "ui_action", Outcome: "queued", Attributes: map[string]any{"provider_id": id}})
+	correlationID := diagnostics.CorrelationID(ctx)
 	g.logger.Printf("provider scan action=queued provider=%q", id)
 	g.scanWG.Add(1)
 	go func() {
 		defer g.scanWG.Done()
-		summary, err := g.app.Scan(g.background, id)
+		scanContext := diagnostics.WithCorrelation(g.background, correlationID)
+		started := time.Now()
+		summary, err := g.app.Scan(scanContext, id)
 		if err != nil {
+			g.record(scanContext, diagnostics.Event{Severity: diagnostics.SeverityError, Component: "gateway", Operation: "provider.scan", Phase: "background_result", Outcome: "failed", Message: err.Error(), Duration: time.Since(started), Attributes: map[string]any{"provider_id": id}})
 			g.logger.Printf("provider scan result=failed provider=%q error=%q", id, err)
 			return
 		}
+		g.record(scanContext, diagnostics.Event{Component: "gateway", Operation: "provider.scan", Phase: "background_result", Outcome: "completed", Duration: time.Since(started), Attributes: map[string]any{"provider_id": id, "observed": summary.Observed, "unstable": summary.Unstable, "issues": len(summary.Issues)}})
 		g.logger.Printf("provider scan result=complete provider=%q observed=%d unstable=%d issues=%d next=reconcile-complete",
 			id, summary.Observed, summary.Unstable, len(summary.Issues))
 	}()
 	w.WriteHeader(http.StatusAccepted)
+}
+
+func (g *Gateway) debugStatus(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, g.diagnostics.Status(), nil)
+}
+
+func (g *Gateway) startDebug(w http.ResponseWriter, r *http.Request) {
+	ctx := diagnostics.EnsureCorrelation(r.Context())
+	info, err := g.diagnostics.Start(ctx)
+	if err != nil {
+		writeAPIError(w, err, http.StatusConflict)
+		return
+	}
+	g.record(ctx, diagnostics.Event{Component: "gateway", Operation: "debug.session", Phase: "ui_action", Outcome: "started"})
+	writeJSON(w, info, nil)
+}
+
+func (g *Gateway) stopDebug(w http.ResponseWriter, r *http.Request) {
+	ctx := diagnostics.EnsureCorrelation(r.Context())
+	g.record(ctx, diagnostics.Event{Component: "gateway", Operation: "debug.session", Phase: "ui_action", Outcome: "stop_requested"})
+	info, err := g.diagnostics.Stop(ctx)
+	if err != nil {
+		writeAPIError(w, err, http.StatusConflict)
+		return
+	}
+	writeJSON(w, info, nil)
+}
+
+func (g *Gateway) record(ctx context.Context, event diagnostics.Event) {
+	if g.diagnostics.Enabled() {
+		g.diagnostics.Record(ctx, event)
+	}
+}
+
+func (g *Gateway) validationFailure(ctx context.Context, reason, path string) {
+	g.record(ctx, diagnostics.Event{Severity: diagnostics.SeverityWarn, Component: "gateway", Operation: "request.validate", Phase: "validation", Outcome: "refused", Message: reason, Attributes: map[string]any{"path": path}})
+}
+
+func (g *Gateway) recoverPanics(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				g.diagnostics.CapturePanic(r.Context(), "gateway", "http.request", recovered, debug.Stack())
+				g.logger.Printf("gateway panic path=%q panic=%q", r.URL.Path, recovered)
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (g *Gateway) search(w http.ResponseWriter, r *http.Request) {

@@ -14,6 +14,23 @@
     return response;
   };
 
+  const debugAction = async (button, action) => {
+    button.disabled = true;
+    const original = button.textContent;
+    button.textContent = action === "start" ? "Starting\u2026" : "Stopping\u2026";
+    try {
+      await mutate(`/api/debug/${action}`, {method: "POST"});
+      window.location.reload();
+    } catch (error) {
+      window.alert(error.message);
+      button.disabled = false;
+      button.textContent = original;
+    }
+  };
+
+  document.getElementById("start-debug")?.addEventListener("click", (event) => debugAction(event.currentTarget, "start"));
+  document.getElementById("stop-debug")?.addEventListener("click", (event) => debugAction(event.currentTarget, "stop"));
+
   document.querySelectorAll("[data-scan-provider]").forEach((button) => {
     button.addEventListener("click", async () => {
       button.disabled = true;
