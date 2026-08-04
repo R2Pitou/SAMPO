@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -10,25 +9,25 @@ import (
 	"sync"
 	"time"
 
-	"sampo/internal/catalog"
 	"sampo/internal/domain"
 	"sampo/internal/observer"
 	"sampo/internal/rootidentity"
+	"sampo/internal/seshat"
 )
 
 type Service struct {
-	store   *catalog.Store
+	store   seshat.Catalogue
 	scanner observer.Scanner
 	roots   rootidentity.Prober
 	mu      sync.Mutex
 	running map[string]bool
 }
 
-func New(store *catalog.Store) *Service {
+func New(store seshat.Catalogue) *Service {
 	return newWithRootProber(store, rootidentity.SystemProber{})
 }
 
-func newWithRootProber(store *catalog.Store, roots rootidentity.Prober) *Service {
+func newWithRootProber(store seshat.Catalogue, roots rootidentity.Prober) *Service {
 	return &Service{
 		store:   store,
 		scanner: observer.Scanner{HashRetries: 2},
@@ -71,8 +70,8 @@ func (s *Service) Scan(ctx context.Context, providerID string) (domain.ScanSumma
 
 	provider, err := s.store.Provider(ctx, providerID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return domain.ScanSummary{}, errors.New("provider not found")
+		if errors.Is(err, seshat.ErrNotFound) {
+			return domain.ScanSummary{}, fmt.Errorf("provider: %w", err)
 		}
 		return domain.ScanSummary{}, err
 	}
@@ -135,6 +134,6 @@ func (s *Service) Search(ctx context.Context, query string, limit int) ([]domain
 	return s.store.Search(ctx, query, limit)
 }
 
-func (s *Service) Stats(ctx context.Context) (catalog.Stats, error) {
+func (s *Service) Stats(ctx context.Context) (domain.CatalogueStats, error) {
 	return s.store.Stats(ctx)
 }

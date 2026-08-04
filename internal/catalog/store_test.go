@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"sampo/internal/domain"
+	"sampo/internal/seshat"
 )
 
 func TestOpenUsesDurableRollbackConfiguration(t *testing.T) {
@@ -45,6 +46,17 @@ func TestOpenRejectsCorruptCatalogue(t *testing.T) {
 	if err == nil {
 		store.Close()
 		t.Fatal("corrupt catalogue was accepted")
+	}
+}
+
+func TestStoreTranslatesNotFoundAtSeshatBoundary(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	if _, err := store.Provider(ctx, "missing"); !errors.Is(err, seshat.ErrNotFound) {
+		t.Fatalf("Provider error = %v, want Seshat not-found", err)
+	}
+	if err := store.BeginScan(ctx, "missing", time.Now().UTC()); !errors.Is(err, seshat.ErrNotFound) {
+		t.Fatalf("BeginScan error = %v, want Seshat not-found", err)
 	}
 }
 
@@ -218,7 +230,7 @@ func TestProviderEnrollmentRejectsPhysicalDuplicateAndOverlap(t *testing.T) {
 	alias := first
 	alias.SubmittedLocator = `\\?\C:\Data`
 	alias.OperationalLocator = alias.SubmittedLocator
-	if _, err := store.AddFilesystemProvider(ctx, "Alias", alias); !errors.Is(err, ErrProviderRootDuplicate) {
+	if _, err := store.AddFilesystemProvider(ctx, "Alias", alias); !errors.Is(err, seshat.ErrProviderRootDuplicate) {
 		t.Fatalf("physical alias error = %v, want duplicate", err)
 	}
 
@@ -227,7 +239,7 @@ func TestProviderEnrollmentRejectsPhysicalDuplicateAndOverlap(t *testing.T) {
 		FinalPathEvidence: `\\?\Volume{test}\Data\Child`, PhysicalIdentity: "physical-child",
 		FallbackIdentity: "fallback-child", IdentityConfidence: domain.RootIdentityStrong,
 	}
-	if _, err := store.AddFilesystemProvider(ctx, "Child", child); !errors.Is(err, ErrProviderRootOverlap) {
+	if _, err := store.AddFilesystemProvider(ctx, "Child", child); !errors.Is(err, seshat.ErrProviderRootOverlap) {
 		t.Fatalf("child overlap error = %v, want overlap", err)
 	}
 
@@ -236,7 +248,7 @@ func TestProviderEnrollmentRejectsPhysicalDuplicateAndOverlap(t *testing.T) {
 		FinalPathEvidence: `\\?\Volume{test}\`, PhysicalIdentity: "physical-parent",
 		FallbackIdentity: "fallback-parent", IdentityConfidence: domain.RootIdentityStrong,
 	}
-	if _, err := store.AddFilesystemProvider(ctx, "Parent", parent); !errors.Is(err, ErrProviderRootOverlap) {
+	if _, err := store.AddFilesystemProvider(ctx, "Parent", parent); !errors.Is(err, seshat.ErrProviderRootOverlap) {
 		t.Fatalf("parent overlap error = %v, want overlap", err)
 	}
 }
@@ -273,7 +285,7 @@ func TestProviderEnrollmentSerializesConcurrentPhysicalAliases(t *testing.T) {
 		switch {
 		case err == nil:
 			succeeded++
-		case errors.Is(err, ErrProviderRootDuplicate):
+		case errors.Is(err, seshat.ErrProviderRootDuplicate):
 			rejected++
 		default:
 			t.Fatalf("unexpected enrollment error: %v", err)

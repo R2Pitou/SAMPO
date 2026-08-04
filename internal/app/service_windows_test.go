@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"sampo/internal/catalog"
+	"sampo/internal/seshat"
 )
 
 func TestWindowsEnrollmentRejectsAliasesAndOverlappingRoots(t *testing.T) {
@@ -26,10 +27,10 @@ func TestWindowsEnrollmentRejectsAliasesAndOverlappingRoots(t *testing.T) {
 	if _, err := service.EnrollFilesystem(ctx, "Root", root); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.EnrollFilesystem(ctx, "Extended alias", `\\?\`+root); !errors.Is(err, catalog.ErrProviderRootDuplicate) {
+	if _, err := service.EnrollFilesystem(ctx, "Extended alias", `\\?\`+root); !errors.Is(err, seshat.ErrProviderRootDuplicate) {
 		t.Fatalf("extended alias error = %v, want duplicate", err)
 	}
-	if _, err := service.EnrollFilesystem(ctx, "Child", child); !errors.Is(err, catalog.ErrProviderRootOverlap) {
+	if _, err := service.EnrollFilesystem(ctx, "Child", child); !errors.Is(err, seshat.ErrProviderRootOverlap) {
 		t.Fatalf("child error = %v, want overlap", err)
 	}
 }
@@ -60,7 +61,7 @@ func TestWindowsConcurrentAliasEnrollmentCommitsOnce(t *testing.T) {
 		switch {
 		case err == nil:
 			succeeded++
-		case errors.Is(err, catalog.ErrProviderRootDuplicate):
+		case errors.Is(err, seshat.ErrProviderRootDuplicate):
 			rejected++
 		default:
 			t.Fatalf("unexpected enrollment result: %v", err)

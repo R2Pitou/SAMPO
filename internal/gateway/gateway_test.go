@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"sampo/internal/catalog"
 	"sampo/internal/domain"
 )
 
@@ -27,7 +26,9 @@ func (fakeApplication) Providers(context.Context) ([]domain.Provider, error) { r
 func (fakeApplication) Search(context.Context, string, int) ([]domain.SearchResult, error) {
 	return nil, nil
 }
-func (fakeApplication) Stats(context.Context) (catalog.Stats, error) { return catalog.Stats{}, nil }
+func (fakeApplication) Stats(context.Context) (domain.CatalogueStats, error) {
+	return domain.CatalogueStats{}, nil
+}
 
 func TestGatewayRequiresOneTimeSessionOriginAndCSRF(t *testing.T) {
 	const baseURL = "http://127.0.0.1:43123"

@@ -63,6 +63,13 @@ type SearchResult struct {
 	Appearances []Appearance `json:"appearances"`
 }
 
+type CatalogueStats struct {
+	Providers        int `json:"providers"`
+	Contents         int `json:"contents"`
+	AvailableFiles   int `json:"availableFiles"`
+	UnavailableFiles int `json:"unavailableFiles"`
+}
+
 type ScanIssue struct {
 	Locator string `json:"locator"`
 	Code    string `json:"code"`

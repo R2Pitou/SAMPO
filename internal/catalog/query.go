@@ -7,22 +7,15 @@ import (
 
 import "sampo/internal/domain"
 
-type Stats struct {
-	Providers        int `json:"providers"`
-	Contents         int `json:"contents"`
-	AvailableFiles   int `json:"availableFiles"`
-	UnavailableFiles int `json:"unavailableFiles"`
-}
-
-func (s *Store) Stats(ctx context.Context) (Stats, error) {
-	var stats Stats
+func (s *Store) Stats(ctx context.Context) (domain.CatalogueStats, error) {
+	var stats domain.CatalogueStats
 	if err := s.db.QueryRowContext(ctx, `SELECT
         (SELECT count(*) FROM providers),
         (SELECT count(*) FROM contents),
         (SELECT count(*) FROM appearances WHERE availability='available'),
         (SELECT count(*) FROM appearances WHERE availability='unavailable')`).Scan(
 		&stats.Providers, &stats.Contents, &stats.AvailableFiles, &stats.UnavailableFiles); err != nil {
-		return Stats{}, fmt.Errorf("read catalogue stats: %w", err)
+		return domain.CatalogueStats{}, fmt.Errorf("read catalogue stats: %w", err)
 	}
 	return stats, nil
 }

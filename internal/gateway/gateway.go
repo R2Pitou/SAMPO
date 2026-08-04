@@ -19,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"sampo/internal/catalog"
 	"sampo/internal/domain"
 )
 
@@ -33,7 +32,7 @@ type Application interface {
 	Scan(context.Context, string) (domain.ScanSummary, error)
 	Providers(context.Context) ([]domain.Provider, error)
 	Search(context.Context, string, int) ([]domain.SearchResult, error)
-	Stats(context.Context) (catalog.Stats, error)
+	Stats(context.Context) (domain.CatalogueStats, error)
 }
 
 type Gateway struct {
@@ -247,7 +246,7 @@ func (g *Gateway) bootstrapSession(w http.ResponseWriter, r *http.Request) {
 type indexData struct {
 	CSRF      string
 	Query     string
-	Stats     catalog.Stats
+	Stats     domain.CatalogueStats
 	Providers []domain.Provider
 	Results   []domain.SearchResult
 	Error     string

@@ -10,21 +10,20 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 
 	"sampo/internal/domain"
+	"sampo/internal/seshat"
 )
 
 const schemaVersion = 2
 
-var (
-	ErrProviderRootDuplicate = errors.New("provider root is already enrolled")
-	ErrProviderRootOverlap   = errors.New("provider root overlaps an enrolled provider")
-)
-
 type Store struct {
 	db *sql.DB
 }
+
+var _ seshat.Catalogue = (*Store)(nil)
 
 func Open(ctx context.Context, path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
@@ -226,8 +225,8 @@ func (s *Store) AddFilesystemProvider(ctx context.Context, displayName string, r
 		root.PhysicalIdentity, root.FallbackIdentity, root.IdentityConfidence,
 		root.CatalogueOnly, unixNano(now), provider.ScanStatus)
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return domain.Provider{}, ErrProviderRootDuplicate
+		if isSQLiteUniqueConstraint(err) {
+			return domain.Provider{}, seshat.ErrProviderRootDuplicate
 		}
 		return domain.Provider{}, fmt.Errorf("add filesystem provider: %w", err)
 	}
@@ -248,7 +247,7 @@ func (s *Store) EstablishProviderRoot(ctx context.Context, providerID string, ro
 	defer tx.Rollback()
 	var confidence string
 	if err := tx.QueryRowContext(ctx, `SELECT identity_confidence FROM providers WHERE id=?`, providerID).Scan(&confidence); err != nil {
-		return err
+		return translateSQLiteError(err)
 	}
 	if confidence != domain.RootIdentityLegacy {
 		return errors.New("provider root identity is already established")
@@ -263,8 +262,8 @@ func (s *Store) EstablishProviderRoot(ctx context.Context, providerID string, ro
 		root.FinalPathEvidence, root.PhysicalIdentity, root.FallbackIdentity,
 		root.IdentityConfidence, root.CatalogueOnly, providerID, domain.RootIdentityLegacy)
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return ErrProviderRootDuplicate
+		if isSQLiteUniqueConstraint(err) {
+			return seshat.ErrProviderRootDuplicate
 		}
 		return fmt.Errorf("establish provider root identity: %w", err)
 	}
@@ -315,10 +314,7 @@ func scanProvider(row rowScanner) (domain.Provider, error) {
 		&p.PhysicalIdentity, &p.FallbackIdentity, &p.IdentityConfidence,
 		&p.CatalogueOnly, &created,
 		&started, &ended, &p.ScanStatus, &p.ScanError); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return domain.Provider{}, err
-		}
-		return domain.Provider{}, fmt.Errorf("scan provider: %w", err)
+		return domain.Provider{}, fmt.Errorf("scan provider: %w", translateSQLiteError(err))
 	}
 	p.RootLocator = p.SubmittedLocator
 	p.CreatedAt = fromUnixNano(created)
@@ -379,10 +375,10 @@ func rejectRootConflict(ctx context.Context, tx *sql.Tx, excludedID string, cand
 	}
 	for _, existing := range enrolled {
 		if samePhysicalRoot(existing.ProviderRoot, candidate) {
-			return fmt.Errorf("%w: provider %s", ErrProviderRootDuplicate, existing.ID)
+			return fmt.Errorf("%w: provider %s", seshat.ErrProviderRootDuplicate, existing.ID)
 		}
 		if rootPathsOverlap(existing.FinalPathEvidence, candidate.FinalPathEvidence) {
-			return fmt.Errorf("%w: provider %s", ErrProviderRootOverlap, existing.ID)
+			return fmt.Errorf("%w: provider %s", seshat.ErrProviderRootOverlap, existing.ID)
 		}
 	}
 	return nil
@@ -441,7 +437,7 @@ func (s *Store) BeginScan(ctx context.Context, providerID string, started time.T
 		return fmt.Errorf("begin scan: %w", err)
 	}
 	if n, _ := result.RowsAffected(); n != 1 {
-		return sql.ErrNoRows
+		return seshat.ErrNotFound
 	}
 	return nil
 }
@@ -718,4 +714,20 @@ func insertEvent(ctx context.Context, tx *sql.Tx, appearanceID, kind, oldLocator
 		return fmt.Errorf("record appearance event: %w", err)
 	}
 	return nil
+}
+
+func translateSQLiteError(err error) error {
+	if errors.Is(err, sql.ErrNoRows) {
+		return seshat.ErrNotFound
+	}
+	return err
+}
+
+func isSQLiteUniqueConstraint(err error) bool {
+	var sqliteErr *sqlite.Error
+	if !errors.As(err, &sqliteErr) {
+		return false
+	}
+	code := sqliteErr.Code()
+	return code == sqlite3.SQLITE_CONSTRAINT_UNIQUE || code == sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY
 }
